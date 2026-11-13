@@ -199,7 +199,7 @@ Response:
 
 ## Refusals
 
-A refusal is `{ "ok": false, "refusal": { "type": "<type>", "name": "<secret name or null>", "message": "<human text, no values>", "retryable": true|false } }`.
+A refusal is `{ "ok": false, "refusal": { "type": "<type>", "name": "<secret name or null>", "message": "<human text, no values>", "retryable": true|false } }`, plus the optional fields below.
 
 | `type` | When | `retryable` | Expected host behavior |
 | --- | --- | --- | --- |
@@ -212,7 +212,7 @@ A refusal is `{ "ok": false, "refusal": { "type": "<type>", "name": "<secret nam
 | `scope_not_allowed` | `project`/`session` asked for a `sensitive` secret | no | Offer `once` |
 | `scope_binary` | Command's binary not in the secret's `binaries` | no | Tell the user; user may edit the allowlist |
 | `no_project` | `layer: "project"` or `suggested_layer: "project"` while `cwd` is not inside a repository | no | Use `global`, or run from the repository |
-| `dump_command` | Command matches the dump-guard list | no | Tell the model the command is refused while secrets are injected |
+| `dump_command` | Command matches the dump-guard list. Carries `rule`, `hint` and, when known, `segment` (below) | no | Tell the model which rule stopped it and what to do instead; an unlocked vault and a valid grant never override the guard |
 | `not_model_callable` | `grant` arrived over MCP or without a prompt token | no | Log; this is an attack signal |
 | `vault_locked` | Keychain unavailable and no cached passphrase | yes | Prompt for passphrase |
 | `vault_corrupt` | AEAD tag or envelope check failed | no | Point to `qbit-vault restore` |
@@ -221,6 +221,27 @@ A refusal is `{ "ok": false, "refusal": { "type": "<type>", "name": "<secret nam
 | `internal` | Anything else | maybe | Message never contains values |
 
 Messages MUST be built from the secret **name** and fixed strings only.
+
+### Optional refusal fields: `rule`, `hint`, `segment`
+
+A refusal MAY carry these fields; they are omitted when empty, so a refusal without them is unchanged. They are built from fixed strings only (a `hint` may name the secret at most): never a value, the command, an argument, a URL, a path the user typed, or the text of a pattern. `type`, `name`, `retryable` and the exit codes do not depend on them.
+
+- `rule`: why the guard refused (`dump_command` only). One of a closed set, below.
+- `hint`: fixed text saying what to do instead, up to 500 characters.
+- `segment`: 0-based index of the top-level pipeline segment (split on `|`, `||`, `&&`, `;`, `&` and newlines) that holds the match; a script run by `sh -c` or a `$(...)` counts as part of its segment. Omitted when not known (for example a here-document body, or a command run under `cmd` or `pwsh`). Never the segment's text.
+
+For `dump_command` the `message` is `the command is refused while secrets are injected: <phrase>`:
+
+| `rule` | Phrase | Refuses |
+| --- | --- | --- |
+| `environment_dump` | `it lists or reads the environment` | `env`, `printenv`, `set`, `export -p`, `declare`/`typeset` listings, `compgen`, `/proc/*/environ`, PowerShell `env:` listings, `[Environment]::GetEnvironmentVariables`, interpreter scripts that read the environment |
+| `value_print` | `it prints a secret value` | `echo`, `printf` or `Write-Output` of `$NAME`, `$env:NAME` or `%NAME%`; here-strings of the value |
+| `value_encode` | `it encodes a secret value` | `base64`, `xxd`, `od` or `hexdump` of the value |
+| `network_argument` | `it puts a secret value in a network command's arguments` | `curl`, `wget`, `http`, `nc`, `ncat` or `socat` with the value in an argument, wherever the segment sits in a pipeline |
+| `encoded_script` | `its script is encoded and cannot be checked` | PowerShell `-EncodedCommand` and its prefixes |
+| `custom_rule` | `it matches a rule in your dumpguard.yaml` | A pattern from the user's `dumpguard.yaml`; its text is never shown |
+
+The set is closed within a major version. Filtering the output (`| jq`, `| grep`) is not an exemption: the command is refused before any process starts, whatever follows the matching segment. The `dumpguard.yaml` format is unchanged; the rule of each default pattern is fixed in code and every user pattern is `custom_rule`.
 
 Every refusal answered to a request with a valid envelope, over the host or the model transport, is appended to the audit log as a `refusal` record: the `type`, the `name` when there is one, and the envelope's `session`. The record never holds the command, the reason or a value.
 

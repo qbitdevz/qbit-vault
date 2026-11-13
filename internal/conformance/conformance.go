@@ -60,6 +60,21 @@ func (s *Schema) RefusalTypes() []string {
 	return out
 }
 
+// RefusalRules is the dump_command `rule` enum of the schema.
+func (s *Schema) RefusalRules() []string {
+	defs, _ := s.doc["$defs"].(map[string]any)
+	r, _ := defs["refusal"].(map[string]any)
+	p, _ := r["properties"].(map[string]any)
+	in, _ := p["refusal"].(map[string]any)
+	ip, _ := in["properties"].(map[string]any)
+	ru, _ := ip["rule"].(map[string]any)
+	var out []string
+	for _, v := range ru["enum"].([]any) {
+		out = append(out, v.(string))
+	}
+	return out
+}
+
 // as resolves the schema with its root replaced by a $ref to def.
 func (s *Schema) as(def string) (*jsonschema.Resolved, error) {
 	if rs, ok := s.resolved[def]; ok {

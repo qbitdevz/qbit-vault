@@ -22,7 +22,7 @@ func TestTypesMatchContract(t *testing.T) {
 		t.Fatal("CONTRACT.md has no Refusals section")
 	}
 	sec = sec[i+1:]
-	if j := strings.Index(sec[3:], "\n## "); j >= 0 {
+	if j := strings.Index(sec[3:], "\n#"); j >= 0 { // the type table ends at the next heading
 		sec = sec[:j+3]
 	}
 	row := regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\|")
@@ -113,5 +113,67 @@ func TestPartialIsOptionalAndOnlyOnRequest(t *testing.T) {
 	want := `{"ok":false,"refusal":{"type":"timeout","name":null,"message":"the command timed out","retryable":true,"partial":{"stdout":"out text","stderr":"err text"}}}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
+	}
+}
+
+func TestNewDumpRules(t *testing.T) {
+	for _, rule := range Rules() {
+		r := NewDump(rule, 2)
+		if r.Type != DumpCommand || r.Rule != rule || r.Hint == "" || r.Segment == nil || *r.Segment != 2 || r.Retryable {
+			t.Errorf("%s: %+v", rule, r)
+		}
+		if !strings.HasPrefix(r.Message, "the command is refused while secrets are injected: ") || len(r.Message) > 500 {
+			t.Errorf("%s: message %q", rule, r.Message)
+		}
+	}
+	if r := NewDump(EnvironmentDump, -1); r.Segment != nil {
+		t.Errorf("unknown segment must be omitted: %+v", r)
+	}
+	if r := NewDump("nope", 0); r != New(DumpCommand, "") {
+		t.Errorf("unknown rule must be the plain refusal: %+v", r)
+	}
+}
+
+// Every other refusal stays byte-identical: the new fields are omitted when empty.
+func TestOptionalFieldsOmitted(t *testing.T) {
+	b, _ := json.Marshal(New(GrantRequired, "A").Envelope())
+	want := `{"ok":false,"refusal":{"type":"grant_required","name":"A","message":"A has no active grant","retryable":true}}`
+	if string(b) != want {
+		t.Fatalf("%s", b)
+	}
+}
+
+// The rules of the contract's table are exactly the ones in code.
+func TestRulesMatchContract(t *testing.T) {
+	data, err := os.ReadFile("../../contracts/secrets-broker/v1/CONTRACT.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := string(data)
+	i := strings.Index(sec, "\n### Optional refusal fields")
+	if i < 0 {
+		t.Fatal("CONTRACT.md has no optional refusal fields section")
+	}
+	sec = sec[i+1:]
+	if j := strings.Index(sec[3:], "\n#"); j >= 0 {
+		sec = sec[:j+3]
+	}
+	row := regexp.MustCompile("(?m)^[|] `([a-z_]+)` [|] `([^`]+)` [|]")
+	var want []string
+	for _, m := range row.FindAllStringSubmatch(sec, -1) {
+		if m[1] == "rule" {
+			continue
+		}
+		if got := rules[Rule(m[1])].phrase; got != m[2] {
+			t.Errorf("%s: phrase %q in code, %q in the contract", m[1], got, m[2])
+		}
+		want = append(want, m[1])
+	}
+	var got []string
+	for _, r := range Rules() {
+		got = append(got, string(r))
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("rules\n got %v\nwant %v", got, want)
 	}
 }

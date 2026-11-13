@@ -97,6 +97,14 @@ func TestContractConformance(t *testing.T) {
 	if !reflect.DeepEqual(code, schema) {
 		t.Fatalf("refusal types drifted:\ncode   %v\nschema %v", code, schema)
 	}
+	// The same for the dump_command rules (CONTRACT.md § Refusals).
+	var rules []string
+	for _, r := range refusal.Rules() {
+		rules = append(rules, string(r))
+	}
+	if got := sch.RefusalRules(); !reflect.DeepEqual(rules, got) {
+		t.Fatalf("dump_command rules drifted:\ncode   %v\nschema %v", rules, got)
+	}
 	t.Logf("refusal types exercised: %s", strings.Join(keys(seen), ", "))
 }
 

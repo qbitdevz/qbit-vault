@@ -78,6 +78,11 @@ type Refusal struct {
 	Message   string   `json:"message"`
 	Retryable bool     `json:"retryable"`
 	Partial   *Partial `json:"partial,omitempty"`
+	// Rule, Hint and Segment are optional, fixed-text guidance (CONTRACT §
+	// Refusals). They never carry a value, the command or a pattern's text.
+	Rule    Rule   `json:"rule,omitempty"`
+	Hint    string `json:"hint,omitempty"`
+	Segment *int   `json:"segment,omitempty"`
 }
 
 // Envelope is the wire form: {"ok":false,"refusal":{…}}.
@@ -98,6 +103,57 @@ func New(t Type, name string) Refusal {
 		if s.named != "" {
 			r.Message = name + s.named
 		}
+	}
+	return r
+}
+
+// Rule is the closed set of reasons a dump_command refusal names.
+type Rule string
+
+const (
+	EnvironmentDump Rule = "environment_dump"
+	ValuePrint      Rule = "value_print"
+	ValueEncode     Rule = "value_encode"
+	NetworkArgument Rule = "network_argument"
+	EncodedScript   Rule = "encoded_script"
+	CustomRule      Rule = "custom_rule"
+)
+
+type ruleText struct{ phrase, hint string }
+
+var rules = map[Rule]ruleText{
+	EnvironmentDump: {"it lists or reads the environment",
+		"Run the program that needs the secret and let it read its own environment; to check that a secret is set, use ${#NAME}. Never print the environment."},
+	ValuePrint: {"it prints a secret value",
+		"Do not print the value; to check that a secret is set, use ${#NAME}."},
+	ValueEncode: {"it encodes a secret value",
+		"Encoding does not hide a value; pass it to the program that needs it through its environment."},
+	NetworkArgument: {"it puts a secret value in a network command's arguments",
+		"Use a client that reads the credential from its own environment variable or config (for example gh with GH_TOKEN, or a script that reads os.environ), or a config file the client loads. Filtering the output does not exempt an earlier pipeline segment."},
+	EncodedScript: {"its script is encoded and cannot be checked",
+		"Pass the script as plain text."},
+	CustomRule: {"it matches a rule in your dumpguard.yaml",
+		"Ask the user; their dumpguard.yaml rule is not shown."},
+}
+
+// Rules returns every dump_command rule.
+func Rules() []Rule {
+	return []Rule{EnvironmentDump, ValuePrint, ValueEncode, NetworkArgument, EncodedScript, CustomRule}
+}
+
+// NewDump builds a dump_command refusal for rule. segment is the 0-based
+// index of the pipeline segment that matched, or negative when unknown. An
+// unknown rule yields the plain refusal.
+func NewDump(rule Rule, segment int) Refusal {
+	r := New(DumpCommand, "")
+	t, ok := rules[rule]
+	if !ok {
+		return r
+	}
+	r.Message += ": " + t.phrase
+	r.Rule, r.Hint = rule, t.hint
+	if segment >= 0 {
+		r.Segment = &segment
 	}
 	return r
 }
