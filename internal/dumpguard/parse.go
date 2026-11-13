@@ -48,8 +48,15 @@ func (e *ParseError) Error() string {
 }
 
 type pat struct {
-	src  string
-	line int
+	src   string
+	line  int
+	class Class
+}
+
+// compiledPat is a pattern compiled for one set of injected names.
+type compiledPat struct {
+	re    *regexp.Regexp
+	class Class
 }
 
 // maxCompiledSets bounds the cache of compiled name sets (A-F11).
@@ -60,7 +67,7 @@ type Guard struct {
 	pats []pat
 
 	mu    sync.Mutex
-	cache map[string][]*regexp.Regexp
+	cache map[string][]compiledPat
 }
 
 // Default returns the guard of the embedded default patterns.
@@ -156,7 +163,7 @@ func parse(data []byte) ([]pat, error) {
 			if _, err := regexp.Compile(expand(s, []string{"X"})); err != nil {
 				return bad(n, "invalid pattern")
 			}
-			pats = append(pats, pat{src: s, line: n})
+			pats = append(pats, pat{src: s, line: n, class: classOf(s)})
 		case indent > 0:
 			return bad(n, "unexpected indentation")
 		case strings.HasPrefix(trimmed, "format:"):
@@ -271,7 +278,7 @@ func expand(pattern string, names []string) string {
 }
 
 // compiled returns the regexps for one set of injected names, compiled once.
-func (g *Guard) compiled(names []string) []*regexp.Regexp {
+func (g *Guard) compiled(names []string) []compiledPat {
 	uniq := append([]string(nil), names...)
 	sort.Strings(uniq)
 	key := strings.Join(uniq, ",")
@@ -280,14 +287,14 @@ func (g *Guard) compiled(names []string) []*regexp.Regexp {
 	if res, ok := g.cache[key]; ok {
 		return res
 	}
-	res := make([]*regexp.Regexp, 0, len(g.pats))
+	res := make([]compiledPat, 0, len(g.pats))
 	for _, p := range g.pats {
 		if re, err := regexp.Compile(expand(p.src, uniq)); err == nil {
-			res = append(res, re)
+			res = append(res, compiledPat{re, p.class})
 		}
 	}
 	if g.cache == nil || len(g.cache) >= maxCompiledSets {
-		g.cache = map[string][]*regexp.Regexp{}
+		g.cache = map[string][]compiledPat{}
 	}
 	g.cache[key] = res
 	return res
