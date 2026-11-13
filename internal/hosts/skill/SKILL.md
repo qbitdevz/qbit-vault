@@ -53,13 +53,21 @@ The host runs qbit-vault over what your built-in tools return and over the files
 
 ## Refusals and what to do
 
+Every refusal carries a `hint`: fixed text saying what to do next. Follow it. A `dump_command` refusal also carries a `rule` (why it was refused, below) and often a `segment` (the 0-based pipeline segment that matched). An unlocked vault and a valid grant never override the dump guard: do not unlock, request a grant or retry the same command to get past it. Filtering the output (`| jq`, `| grep`) does not exempt an earlier pipeline segment, because the command is refused before any process starts.
+
 | Refusal | What to do |
 | --- | --- |
 | `grant_required` | Call `secret_request` for that name (the user approves it), then retry `secret_exec` once. The message may say the grant is for another directory or an earlier value: the same answer, and run the command from the directory the grant was approved in if you can. |
 | `unknown_secret` | The name does not exist here: call `secret_request` so the user can store it. |
 | `user_declined` | Stop asking for it; tell the user what could not be done. Do not re-ask during the cooldown. |
 | `reason_too_vague` | Rephrase the reason: what command, what for. |
-| `dump_command` | The command would print a secret or the environment. Rewrite it so it does not. |
+| `dump_command` | Read the `rule` and the `hint`, then rewrite the command; the table below has one row per rule. |
+| `dump_command` / `environment_dump` | The command lists or reads the environment (`env`, `printenv`, `set`, `/proc/*/environ`, an interpreter script that reads it). Run the program that needs the secret and let it read its own environment; to check a secret is set use `${#NAME}`. |
+| `dump_command` / `value_print` | The command prints a secret value (`echo`, `printf`, `Write-Output` of `$NAME`). Do not print it; check presence with `${#NAME}`. |
+| `dump_command` / `value_encode` | The command encodes a value (`base64`, `xxd`, `od`, `hexdump`). Encoding does not hide a value; pass it to the program that needs it through its environment. |
+| `dump_command` / `network_argument` | The value is in the arguments of `curl`, `wget`, `http`, `nc`, `ncat` or `socat`, in any pipeline segment. Use a client that reads the credential from its own environment variable or config (`gh` with `GH_TOKEN`, a script that reads `os.environ`) or a config file the client loads. |
+| `dump_command` / `encoded_script` | A PowerShell `-EncodedCommand` script cannot be checked. Pass the script as plain text. |
+| `dump_command` / `custom_rule` | The command matches a rule in the user's `dumpguard.yaml`, which is not shown. Ask the user. |
 | `scope_binary` | The secret is limited to other programs. Tell the user; they can change its allowlist. |
 | `scope_not_allowed` | The secret is sensitive: only a one-time (`once`) grant is possible. |
 | `rate_limited` | You asked again too soon after a decline. Back off; do not retry now, tell the user what is blocked. |

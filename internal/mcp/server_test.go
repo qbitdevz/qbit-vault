@@ -117,6 +117,17 @@ func TestDescriptionsMatchContract(t *testing.T) {
 	}
 }
 
+// S5 of odd/tasks/actionable-refusals.md: secret_exec tells the model that a
+// refusal carries a rule and a hint.
+func TestExecDescriptionMentionsRuleAndHint(t *testing.T) {
+	d := ToolDescriptions["secret_exec"]
+	for _, want := range []string{"rule", "hint"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("secret_exec description lacks %q", want)
+		}
+	}
+}
+
 func TestCallsGoThroughTheBrokerWithEnvelope(t *testing.T) {
 	f := &fake{}
 	cs := connect(t, f)

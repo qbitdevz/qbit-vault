@@ -255,3 +255,29 @@ func TestSkillUnlocksThroughTheToolsAndKeepsTheTerminalAsTheFallback(t *testing.
 		}
 	}
 }
+
+// S5 of odd/tasks/actionable-refusals.md: the model reads every dump_command
+// rule with what to do, and is told that neither an unlocked vault nor a grant
+// lifts the guard and that filtering the output is not an exemption.
+func TestSkillExplainsEveryDumpCommandRuleAndTheHint(t *testing.T) {
+	s := string(skill.Content)
+	for _, r := range refusal.Rules() {
+		if !strings.Contains(s, "`"+string(r)+"`") {
+			t.Errorf("skill does not mention the dump_command rule %s", r)
+		}
+	}
+	for _, want := range []string{
+		"`rule`",
+		"`hint`",
+		"An unlocked vault and a valid grant never override the dump guard",
+		"Filtering the output (`| jq`, `| grep`) does not exempt an earlier pipeline segment",
+		"${#NAME}",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
+		}
+	}
+	if strings.Contains(s, "The command would print a secret or the environment. Rewrite it so it does not.") {
+		t.Error("skill still has the generic dump_command row")
+	}
+}
