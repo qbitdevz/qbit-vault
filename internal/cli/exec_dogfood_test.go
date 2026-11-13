@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/qbitdevz/qbit-vault/internal/audit"
+	"github.com/qbitdevz/qbit-vault/internal/refusal"
 	"github.com/qbitdevz/qbit-vault/internal/runner"
 )
 
@@ -118,7 +119,7 @@ func TestExecOnceGrantSurvivesACommandThatNeverStarts(t *testing.T) {
 	w.grantTo(sessA, "GITHUB_TOKEN", "once")
 
 	// Refused before the start: guard, allowlist, usage.
-	w.wantRefusal("dump_command", "", execArgs(sessA, []string{"GITHUB_TOKEN"}, "env; "+run)...)
+	w.wantDump(refusal.EnvironmentDump, 0, execArgs(sessA, []string{"GITHUB_TOKEN"}, "env; "+run)...)
 	w.wantRefusal("scope_binary", "GITHUB_TOKEN", execArgs(sessA, []string{"GITHUB_TOKEN"}, "curl x; "+run)...)
 	if code, _, _ := w.run("", execArgs(sessA, []string{"GITHUB_TOKEN"}, run, "--timeout", "0s")...); code != 2 {
 		t.Fatalf("bad timeout: code %d", code)

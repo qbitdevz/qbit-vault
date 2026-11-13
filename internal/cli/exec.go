@@ -361,8 +361,12 @@ func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
 	// Segments models: the raw text is tested as well (F1).
 	eff := runner.Resolve(p.shell)
 	foreign := eff == runner.ShellCmd || eff == runner.ShellPwsh
-	if guard.Match(p.command, injected) || (foreign && guard.MatchRaw(p.command, injected)) {
-		return refusal.New(refusal.DumpCommand, "")
+	hit, refused := guard.Explain(p.command, injected)
+	if !refused && foreign {
+		hit, refused = guard.ExplainRaw(p.command, injected)
+	}
+	if refused {
+		return refusal.NewDump(refusal.Rule(hit.Class), hit.Segment)
 	}
 
 	// 4. Binary allowlist: every program the shell may start (L3).

