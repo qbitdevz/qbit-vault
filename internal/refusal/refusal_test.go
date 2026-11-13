@@ -239,3 +239,23 @@ func TestHintsAreShortAndValueFree(t *testing.T) {
 		}
 	}
 }
+
+// CONTRACT.md lists the hint of every type (and the override hints) in the
+// words the code uses.
+func TestHintsMatchContract(t *testing.T) {
+	data, err := os.ReadFile("../../contracts/secrets-broker/v1/CONTRACT.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(data)
+	for _, ty := range Types() {
+		if h := New(ty, "").Hint; h != "" && !strings.Contains(doc, "| `"+string(ty)+"` | "+h+" |") {
+			t.Errorf("CONTRACT.md has no hint row for %s with %q", ty, h)
+		}
+	}
+	for _, h := range []string{HintGrantNotApplying, HintNoUnlockDialog, HintBusy, HintBadRequest, HintCancelled, HintNeedsRepository} {
+		if !strings.Contains(doc, "`"+h+"`") {
+			t.Errorf("CONTRACT.md does not list the hint %q", h)
+		}
+	}
+}

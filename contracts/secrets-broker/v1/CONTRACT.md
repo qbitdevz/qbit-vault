@@ -194,8 +194,10 @@ Response:
   "layers": ["global","project"],
   "prompt_backends": ["pi-ui","osascript","powershell","zenity","kdialog","tty"],
   "field_kinds": ["secret","text"], "max_fields": 8,
-  "keychain": "secret-service", "streaming": true, "sync": false }
+  "keychain": "secret-service", "streaming": true, "sync": false, "refusal_hints": 1 }
 ```
+
+`refusal_hints: 1` is a capability row (additive, same major): the broker puts a `hint` on every refusal (and a `rule` on `dump_command`), see § Refusals. A host that does not find the row must not depend on those fields. The `capabilities` version string is unchanged.
 
 ## Refusals
 
@@ -226,9 +228,39 @@ Messages MUST be built from the secret **name** and fixed strings only.
 
 A refusal MAY carry these fields; they are omitted when empty, so a refusal without them is unchanged. They are built from fixed strings only (a `hint` may name the secret at most): never a value, the command, an argument, a URL, a path the user typed, or the text of a pattern. `type`, `name`, `retryable` and the exit codes do not depend on them.
 
+- `hint` is present on every refusal type, with the fixed text below (the capability row `refusal_hints`).
 - `rule`: why the guard refused (`dump_command` only). One of a closed set, below.
 - `hint`: fixed text saying what to do instead, up to 500 characters.
 - `segment`: 0-based index of the top-level pipeline segment (split on `|`, `||`, `&&`, `;`, `&` and newlines) that holds the match; a script run by `sh -c` or a `$(...)` counts as part of its segment. Omitted when not known (for example a here-document body, or a command run under `cmd` or `pwsh`). Never the segment's text.
+
+Hints by type (`dump_command` takes its hint from its `rule`, below):
+
+| Type | Hint |
+| --- | --- |
+| `grant_required` | Call secret_request for this name to ask the user for a grant, then retry once. |
+| `unknown_secret` | Call secret_list to see the stored names; if it is missing, call secret_request with fields to ask the user to store it. |
+| `user_declined` | Do not ask again for the same use; continue without it or ask the user in the chat. |
+| `rate_limited` | Wait; do not retry the same request. |
+| `reason_too_vague` | Say what the command does and why it needs the secret. |
+| `invalid_name` | Names match ^[A-Z][A-Z0-9_]{0,63}$ and each appears once. |
+| `scope_not_allowed` | Ask for scope once; a sensitive secret allows only a one-time grant. |
+| `scope_binary` | The user must add the program to the secret's binaries; ask them. |
+| `no_project` | Use the global layer, or run from inside the repository. |
+| `not_model_callable` | This is a user-only action; ask the user to run it. |
+| `vault_locked` | A QBit Vault tool call such as secret_list opens the unlock dialog; call it again once the user has unlocked. |
+| `vault_corrupt` | Stop; the user runs 'qbit-vault restore'. |
+| `timeout` | Raise timeout_ms or split the command. |
+| `contract_mismatch` | Update qbit-vault; the user runs 'qbit-vault sync' and restarts the agent. |
+| `internal` | Report it; the user can run 'qbit-vault doctor'. |
+
+Six cases replace the hint of their type with another fixed text:
+
+- `grant_required` when a grant exists but does not apply here (another directory, or an earlier value): `A grant exists but does not apply here; call secret_request to ask the user for a new one.`
+- `vault_locked` when `exec` or `list` could show no unlock dialog (the `message` is the 1.4.0 text that names `qbit-vault unlock`): `No unlock dialog could be shown; ask the user to run 'qbit-vault unlock' in their terminal, then retry.`
+- `internal` for a held vault (`vault is busy`): `Another qbit-vault command holds the vault; retry in a moment.`
+- `internal` for an invalid request field (`invalid request: <field>`): `Fix the request and call again.`
+- `internal` for a call cancelled before the user answered: `The call was cancelled before the user answered; call again only if the task still needs it.`
+- `scope_not_allowed` for a project grant outside a repository: `Run it inside a repository, or ask for another scope.`
 
 For `dump_command` the `message` is `the command is refused while secrets are injected: <phrase>`:
 

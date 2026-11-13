@@ -199,6 +199,8 @@ The extension is **not** installed by `init` (it needs the network, invariant 8)
 
 The MCP instructions and the four tool descriptions say *what* the tools do; the `qbit-vault` skill says *when* to reach for them: whenever a command needs a credential, call `secret_list`, then `secret_request` for what is missing, then `secret_exec`; never ask the user to paste a value; what to do with each refusal. Source: `internal/hosts/skill/SKILL.md`, embedded in the binary.
 
+**Refusals.** Every typed refusal carries a fixed, value-free `hint` that says what to do next (CONTRACT.md § Refusals); a `dump_command` refusal also carries a `rule` from a closed set (`environment_dump`, `value_print`, `value_encode`, `network_argument`, `encoded_script`, `custom_rule`) and, when known, the `segment` of the pipeline that matched. A host that shows refusals to the model passes them through unchanged and detects the fields with the capability row `refusal_hints` (`capabilities` op). The skill's refusal table has a row per type and per rule, and says that an unlocked vault and a valid grant never override the dump guard and that filtering the output does not exempt an earlier pipeline segment. The human text of `exec` on a terminal prints the `message` only; the hint travels in JSON, over MCP and over `broker`.
+
 | Host | Skill file | Why there |
 | --- | --- | --- |
 | Claude Code | `~/.claude/skills/qbit-vault/SKILL.md` | Claude Code's personal skills directory |

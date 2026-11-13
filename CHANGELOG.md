@@ -4,6 +4,18 @@ All notable changes to QBit Vault. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+Actionable refusals (issue #60, `odd/tasks/actionable-refusals.md`). The security decisions do not change: the same commands are refused before any process starts.
+
+### Added
+
+- Refusals carry fixed, value-free guidance (CONTRACT.md § Refusals): `hint` on every refusal type (what to do next), and on `dump_command` a `rule` (`environment_dump`, `value_print`, `value_encode`, `network_argument`, `encoded_script`, `custom_rule`) and, when known, the `segment` of the pipeline that matched. They never hold a value, the command, a pattern's text or a path. `grant_required` tells apart "no grant" from "a grant exists but does not apply here".
+- The `capabilities` response has a `refusal_hints: 1` row, so a host can detect the new fields. The `capabilities` version string stays `1.0`.
+- The agent skill has a row per `dump_command` rule and says that an unlocked vault and a valid grant never override the dump guard and that filtering the output does not exempt an earlier pipeline segment; the `secret_exec` tool description mentions `rule` and `hint`.
+
+### Changed
+
+- The `dump_command` message carries the rule phrase: `the command is refused while secrets are injected: <phrase>` (for example `it lists or reads the environment`).
+
 ## [1.4.1] - 2026-11-12
 
 Polish after 1.4.0 (`odd/tasks/polish-1.4.1.md`). Fixes only; no new feature. The Pi extension is `qbit-vault-pi` 0.2.3 (`pi-v0.2.3`).
