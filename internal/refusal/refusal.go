@@ -54,6 +54,37 @@ var specs = map[Type]spec{
 	Internal:         {false, "internal error", ""},
 }
 
+// hints is the fixed next action of each type (CONTRACT § Refusals). Built
+// from fixed text only: no name, no value. dump_command has none here; its
+// hint comes from its rule (NewDump).
+var hints = map[Type]string{
+	GrantRequired:    "Call secret_request for this name to ask the user for a grant, then retry once.",
+	UnknownSecret:    "Call secret_list to see the stored names; if it is missing, call secret_request with fields to ask the user to store it.",
+	UserDeclined:     "Do not ask again for the same use; continue without it or ask the user in the chat.",
+	RateLimited:      "Wait; do not retry the same request.",
+	ReasonTooVague:   "Say what the command does and why it needs the secret.",
+	InvalidName:      "Names match ^[A-Z][A-Z0-9_]{0,63}$ and each appears once.",
+	ScopeNotAllowed:  "Ask for scope once; a sensitive secret allows only a one-time grant.",
+	ScopeBinary:      "The user must add the program to the secret's binaries; ask them.",
+	NoProject:        "Use the global layer, or run from inside the repository.",
+	NotModelCallable: "This is a user-only action; ask the user to run it.",
+	VaultLocked:      "A QBit Vault tool call such as secret_list opens the unlock dialog; call it again once the user has unlocked.",
+	VaultCorrupt:     "Stop; the user runs 'qbit-vault restore'.",
+	Timeout:          "Raise timeout_ms or split the command.",
+	ContractMismatch: "Update qbit-vault; the user runs 'qbit-vault sync' and restarts the agent.",
+	Internal:         "Report it; the user can run 'qbit-vault doctor'.",
+}
+
+// Hints for the cases where the type's own hint would mislead.
+const (
+	HintGrantNotApplying = "A grant exists but does not apply here; call secret_request to ask the user for a new one."
+	HintNoUnlockDialog   = "No unlock dialog could be shown; ask the user to run 'qbit-vault unlock' in their terminal, then retry."
+	HintBusy             = "Another qbit-vault command holds the vault; retry in a moment."
+	HintBadRequest       = "Fix the request and call again."
+	HintCancelled        = "The call was cancelled before the user answered; call again only if the task still needs it."
+	HintNeedsRepository  = "Run it inside a repository, or ask for another scope."
+)
+
 // order is the contract table order.
 var order = []Type{
 	GrantRequired, UnknownSecret, UserDeclined, RateLimited, ReasonTooVague,
@@ -96,7 +127,7 @@ type Envelope struct {
 // already passed validation, never raw user input.
 func New(t Type, name string) Refusal {
 	s := specs[t]
-	r := Refusal{Type: t, Message: s.message, Retryable: s.retryable}
+	r := Refusal{Type: t, Message: s.message, Retryable: s.retryable, Hint: hints[t]}
 	if name != "" {
 		n := name
 		r.Name = &n
@@ -160,6 +191,9 @@ func NewDump(rule Rule, segment int) Refusal {
 
 // WithMessage returns r with a different fixed message.
 func (r Refusal) WithMessage(m string) Refusal { r.Message = m; return r }
+
+// WithHint returns r with a different fixed hint.
+func (r Refusal) WithHint(h string) Refusal { r.Hint = h; return r }
 
 // WithPartial returns r carrying the (already redacted) output a timed-out
 // command produced before it was killed.

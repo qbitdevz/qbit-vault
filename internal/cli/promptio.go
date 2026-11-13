@@ -30,7 +30,7 @@ func (g *globals) backend() (prompt.Backend, error) {
 // audited as a capture or grant, and asking again is fine. It is not a
 // decline, so it starts no cooldown.
 func errCallCancelled() error {
-	return refusal.New(refusal.Internal, "").WithMessage("the request was cancelled before the user answered; nothing was changed").WithRetryable(true)
+	return refusal.New(refusal.Internal, "").WithMessage("the request was cancelled before the user answered; nothing was changed").WithRetryable(true).WithHint(refusal.HintCancelled)
 }
 
 // callGone reports whether the client ended the call this command serves.

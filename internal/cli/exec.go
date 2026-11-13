@@ -279,9 +279,9 @@ func grantRefusal(name string, why grants.Why) refusal.Refusal {
 	r := refusal.New(refusal.GrantRequired, name)
 	switch why {
 	case grants.WhyOtherDirectory:
-		return r.WithMessage(name + " has a project grant for another directory; call secret_request")
+		return r.WithMessage(name + " has a project grant for another directory; call secret_request").WithHint(refusal.HintGrantNotApplying)
 	case grants.WhyOtherRecord:
-		return r.WithMessage(name + " has a grant for an earlier value of it; call secret_request")
+		return r.WithMessage(name + " has a grant for an earlier value of it; call secret_request").WithHint(refusal.HintGrantNotApplying)
 	}
 	return r
 }

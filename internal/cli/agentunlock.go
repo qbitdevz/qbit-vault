@@ -124,7 +124,7 @@ func (g *globals) recordUnlock() {
 func (g *globals) lockedHint(err error) error {
 	var rf refusal.Refusal
 	if errors.As(err, &rf) && rf.Type == refusal.VaultLocked && !g.unlock.asked && !g.unlock.declined {
-		return rf.WithMessage(msgNoDialog)
+		return rf.WithMessage(msgNoDialog).WithHint(refusal.HintNoUnlockDialog)
 	}
 	return err
 }

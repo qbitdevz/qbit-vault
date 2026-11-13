@@ -110,7 +110,7 @@ func (g *globals) recordStrict(r audit.Record) error {
 func grantErr(err error, name string) error {
 	switch {
 	case errors.Is(err, grants.ErrNeedsProject):
-		return refusal.New(refusal.ScopeNotAllowed, name).WithMessage("project scope needs a repository: run it inside one")
+		return refusal.New(refusal.ScopeNotAllowed, name).WithMessage("project scope needs a repository: run it inside one").WithHint(refusal.HintNeedsRepository)
 	case errors.Is(err, grants.ErrScopeNotAllowed):
 		return refusal.New(refusal.ScopeNotAllowed, name)
 	case errors.Is(err, grants.ErrBadToken):

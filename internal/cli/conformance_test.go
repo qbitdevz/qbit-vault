@@ -78,8 +78,13 @@ func TestContractConformance(t *testing.T) {
 		_ = json.Unmarshal([]byte(out), &m)
 		got := ""
 		if def == "refusal" {
-			got = m["refusal"].(map[string]any)["type"].(string)
+			rf := m["refusal"].(map[string]any)
+			got = rf["type"].(string)
 			seen[got] = true
+			// S4 of odd/tasks/actionable-refusals.md: every refusal says what to do next.
+			if h, _ := rf["hint"].(string); h == "" {
+				t.Errorf("%s: %s has no hint: %s", s.name, got, out)
+			}
 		}
 		if got != s.want {
 			t.Errorf("%s: got %q want %q: %s", s.name, got, s.want, out)

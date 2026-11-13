@@ -61,12 +61,12 @@ func TestJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"ok":false,"refusal":{"type":"unknown_secret","name":"GITHUB_TOKEN","message":"GITHUB_TOKEN is not stored","retryable":true}}`
+	want := `{"ok":false,"refusal":{"type":"unknown_secret","name":"GITHUB_TOKEN","message":"GITHUB_TOKEN is not stored","retryable":true,"hint":"Call secret_list to see the stored names; if it is missing, call secret_request with fields to ask the user to store it."}}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}
 	b, _ = json.Marshal(New(InvalidName, "").Envelope())
-	want = `{"ok":false,"refusal":{"type":"invalid_name","name":null,"message":"invalid secret name","retryable":false}}`
+	want = `{"ok":false,"refusal":{"type":"invalid_name","name":null,"message":"invalid secret name","retryable":false,"hint":"Names match ^[A-Z][A-Z0-9_]{0,63}$ and each appears once."}}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}
@@ -110,7 +110,7 @@ func TestPartialIsOptionalAndOnlyOnRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"ok":false,"refusal":{"type":"timeout","name":null,"message":"the command timed out","retryable":true,"partial":{"stdout":"out text","stderr":"err text"}}}`
+	want := `{"ok":false,"refusal":{"type":"timeout","name":null,"message":"the command timed out","retryable":true,"partial":{"stdout":"out text","stderr":"err text"},"hint":"Raise timeout_ms or split the command."}}`
 	if string(b) != want {
 		t.Fatalf("got  %s\nwant %s", b, want)
 	}
@@ -134,11 +134,16 @@ func TestNewDumpRules(t *testing.T) {
 	}
 }
 
-// Every other refusal stays byte-identical: the new fields are omitted when empty.
+// The optional fields are omitted when empty: no rule, no segment on a
+// refusal that has none, and no hint when it is cleared.
 func TestOptionalFieldsOmitted(t *testing.T) {
-	b, _ := json.Marshal(New(GrantRequired, "A").Envelope())
+	b, _ := json.Marshal(New(GrantRequired, "A").WithHint("").Envelope())
 	want := `{"ok":false,"refusal":{"type":"grant_required","name":"A","message":"A has no active grant","retryable":true}}`
 	if string(b) != want {
+		t.Fatalf("%s", b)
+	}
+	b, _ = json.Marshal(New(GrantRequired, "A").Envelope())
+	if strings.Contains(string(b), `"rule"`) || strings.Contains(string(b), `"segment"`) {
 		t.Fatalf("%s", b)
 	}
 }
@@ -175,5 +180,62 @@ func TestRulesMatchContract(t *testing.T) {
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("rules\n got %v\nwant %v", got, want)
+	}
+}
+
+// S4 of odd/tasks/actionable-refusals.md: every refusal type but dump_command
+// (whose hint comes from its rule) carries one fixed hint, built from fixed
+// text only.
+func TestEveryTypeHasItsFixedHint(t *testing.T) {
+	want := map[Type]string{
+		GrantRequired:    "Call secret_request for this name to ask the user for a grant, then retry once.",
+		UnknownSecret:    "Call secret_list to see the stored names; if it is missing, call secret_request with fields to ask the user to store it.",
+		UserDeclined:     "Do not ask again for the same use; continue without it or ask the user in the chat.",
+		RateLimited:      "Wait; do not retry the same request.",
+		ReasonTooVague:   "Say what the command does and why it needs the secret.",
+		InvalidName:      "Names match ^[A-Z][A-Z0-9_]{0,63}$ and each appears once.",
+		ScopeNotAllowed:  "Ask for scope once; a sensitive secret allows only a one-time grant.",
+		ScopeBinary:      "The user must add the program to the secret's binaries; ask them.",
+		NoProject:        "Use the global layer, or run from inside the repository.",
+		DumpCommand:      "",
+		NotModelCallable: "This is a user-only action; ask the user to run it.",
+		VaultLocked:      "A QBit Vault tool call such as secret_list opens the unlock dialog; call it again once the user has unlocked.",
+		VaultCorrupt:     "Stop; the user runs 'qbit-vault restore'.",
+		Timeout:          "Raise timeout_ms or split the command.",
+		ContractMismatch: "Update qbit-vault; the user runs 'qbit-vault sync' and restarts the agent.",
+		Internal:         "Report it; the user can run 'qbit-vault doctor'.",
+	}
+	for _, ty := range Types() {
+		w, ok := want[ty]
+		if !ok {
+			t.Fatalf("no expected hint for %s", ty)
+		}
+		if got := New(ty, "").Hint; got != w {
+			t.Errorf("%s: hint %q, want %q", ty, got, w)
+		}
+		if got := New(ty, "NAME").Hint; got != w {
+			t.Errorf("%s with a name: hint %q, want %q", ty, got, w)
+		}
+	}
+	if New(UnknownSecret, "A").Rule != "" || New(UnknownSecret, "A").Segment != nil {
+		t.Fatal("only dump_command carries a rule or a segment")
+	}
+}
+
+func TestOverrideHintsAreFixedTexts(t *testing.T) {
+	r := New(GrantRequired, "A").WithHint(HintGrantNotApplying)
+	if r.Hint != "A grant exists but does not apply here; call secret_request to ask the user for a new one." {
+		t.Fatalf("hint %q", r.Hint)
+	}
+	if !strings.Contains(New(VaultLocked, "").WithHint(HintNoUnlockDialog).Hint, "qbit-vault unlock") {
+		t.Fatal("the no-dialog hint must send the user to the terminal")
+	}
+}
+
+func TestHintsAreShortAndValueFree(t *testing.T) {
+	for _, ty := range Types() {
+		if h := New(ty, "").Hint; len(h) > 300 || strings.Contains(h, "TESTSECRET_") {
+			t.Errorf("%s: hint %q", ty, h)
+		}
 	}
 }

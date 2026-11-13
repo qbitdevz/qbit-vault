@@ -28,6 +28,9 @@ const (
 	Contract = "qbit-vault.secrets-broker/v1"
 	// Capabilities is the capability version (CONTRACT.md header).
 	Capabilities = "1.0"
+	// RefusalHints is the capability row for the optional refusal fields
+	// `hint`, `rule` and `segment` (CONTRACT.md § Refusals).
+	RefusalHints = 1
 	// MaxRequestBytes bounds one request.
 	MaxRequestBytes = 64 << 10
 
@@ -77,7 +80,7 @@ var (
 
 // invalid is the refusal for a request that fails validation (L3).
 func invalid(field string) refusal.Refusal {
-	return refusal.New(refusal.Internal, "").WithMessage("invalid request: " + field)
+	return refusal.New(refusal.Internal, "").WithMessage("invalid request: " + field).WithHint(refusal.HintBadRequest)
 }
 
 var errMismatch = refusal.New(refusal.ContractMismatch, "")
@@ -254,13 +257,14 @@ func capabilities(info Info) any {
 		Keychain       string   `json:"keychain"`
 		Streaming      bool     `json:"streaming"`
 		Sync           bool     `json:"sync"`
+		RefusalHints   int      `json:"refusal_hints"`
 	}
 	pb := info.PromptBackends
 	if pb == nil {
 		pb = []string{}
 	}
 	return caps{OK: true, Contract: Contract, Capabilities: Capabilities, Ops: ops, Layers: layers,
-		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming}
+		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints}
 }
 
 func execRequest(m fields) (ExecRequest, error) {
