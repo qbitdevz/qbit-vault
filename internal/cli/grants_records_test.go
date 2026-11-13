@@ -279,7 +279,7 @@ func TestProjectScopeOnGlobalHasItsOwnMessage(t *testing.T) {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
 	}
 	code, out, errs = w.run("y\n", "--json", "grant", "PLAIN_KEY", "--scope", "project")
-	wantJSON := jsonOf(t, refusal.New(refusal.ScopeNotAllowed, "PLAIN_KEY").WithMessage(msg).Envelope())
+	wantJSON := jsonOf(t, refusal.New(refusal.ScopeNotAllowed, "PLAIN_KEY").WithMessage(msg).WithHint(refusal.HintNeedsRepository).Envelope())
 	if code != exitcode.Refusal || out != wantJSON || errs != "" {
 		t.Fatalf("json: code=%d out=%q err=%q", code, out, errs)
 	}
