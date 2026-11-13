@@ -766,6 +766,16 @@ func TestExecLeakBattery(t *testing.T) {
 			captured.WriteString(out + errs)
 		}
 	}
+	// The hints of the other refusals (S4 of odd/tasks/actionable-refusals.md):
+	// an unknown name, a name without a grant and a wrong session, each with
+	// the value typed into the command, in human and JSON form.
+	w.setSecret("OTHER_TOKEN", xv, "--global")
+	for _, c := range []struct{ session, name string }{{sessA, "NOT_STORED"}, {sessA, "OTHER_TOKEN"}, {"pi:otherone", "GITHUB_TOKEN"}} {
+		for _, args := range [][]string{{}, {"--json"}} {
+			_, out, errs = w.run("", append(args, execArgs(c.session, []string{c.name}, "true # "+xv)...)...)
+			captured.WriteString(out + errs)
+		}
+	}
 
 	needles := map[string]string{
 		"raw":  xv,
@@ -792,6 +802,11 @@ func TestExecLeakBattery(t *testing.T) {
 		}
 	}
 	check("captured output", []byte(captured.String()))
+	for _, hint := range []string{"Call secret_request for this name", "Call secret_list to see the stored names"} {
+		if !strings.Contains(captured.String(), hint) {
+			t.Errorf("the battery never saw the hint %q", hint)
+		}
+	}
 	err := filepath.WalkDir(w.home, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
