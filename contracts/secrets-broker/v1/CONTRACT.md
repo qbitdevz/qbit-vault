@@ -189,7 +189,7 @@ Response: `{ "ok": true, "revoked": 2 }`
 Request: `{ "op": "capabilities" }`
 Response:
 ```json
-{ "ok": true, "contract": "qbit-vault.secrets-broker/v1", "capabilities": "1.0",
+{ "ok": true, "contract": "qbit-vault.secrets-broker/v1", "capabilities": "1.1",
   "ops": ["request","list","exec","manage","grant","revoke","capabilities"],
   "layers": ["global","project"],
   "prompt_backends": ["pi-ui","osascript","powershell","zenity","kdialog","tty"],

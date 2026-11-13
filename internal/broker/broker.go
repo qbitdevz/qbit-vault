@@ -27,7 +27,7 @@ const (
 	// Contract is the only contract this broker speaks.
 	Contract = "qbit-vault.secrets-broker/v1"
 	// Capabilities is the capability version (CONTRACT.md header).
-	Capabilities = "1.0"
+	Capabilities = "1.1"
 	// RefusalHints is the capability row for the optional refusal fields
 	// `hint`, `rule` and `segment` (CONTRACT.md § Refusals).
 	RefusalHints = 1
