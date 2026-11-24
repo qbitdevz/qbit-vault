@@ -31,6 +31,15 @@ const (
 	// RefusalHints is the capability row for the optional refusal fields
 	// `hint`, `rule` and `segment` (CONTRACT.md § Refusals).
 	RefusalHints = 1
+	// ExecJobs is the capability row for the job ops of the MCP server
+	// (exec_start, exec_status, exec_stop; CONTRACT.md § Jobs). It is reported
+	// only by a backend that serves them.
+	ExecJobs = 1
+	// MaxWaitMS is the longest `exec_status` long poll: under the 60 s some
+	// hosts allow a tool call.
+	MaxWaitMS = 50000
+	// JobIDLen is the length of a job id: 128 random bits as lowercase hex.
+	JobIDLen = 32
 	// DialogLocale is the capability row for the optional `locale` field of
 	// request, list, exec and manage (CONTRACT.md § Dialog language).
 	DialogLocale = 1
@@ -72,8 +81,12 @@ const (
 )
 
 var (
-	ops       = []string{"request", "list", "exec", "manage", "grant", "revoke", "capabilities"}
-	opFields  = map[string][]string{"request": {"name", "fields", "reason", "suggested_scope", "suggested_layer", "locale"}, "list": {"locale"}, "exec": {"command", "secrets", "timeout_ms", "shell", "locale"}, "manage": {"action", "name", "layer", "reason", "to", "changes", "locale"}, "grant": {"name", "layer", "scope", "ttl_ms", "prompt_token"}, "revoke": {"name", "all", "session_only"}, "capabilities": nil}
+	ops = []string{"request", "list", "exec", "manage", "grant", "revoke", "capabilities"}
+	// jobOps are accepted only by a backend that implements JobBackend; they
+	// are not in `ops`, which lists what every transport serves.
+	jobOps    = []string{"exec_start", "exec_status", "exec_stop"}
+	jobIDRE   = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	opFields  = map[string][]string{"exec_start": {"command", "secrets", "timeout_ms", "shell", "locale"}, "exec_status": {"job", "wait_ms"}, "exec_stop": {"job"}, "request": {"name", "fields", "reason", "suggested_scope", "suggested_layer", "locale"}, "list": {"locale"}, "exec": {"command", "secrets", "timeout_ms", "shell", "locale"}, "manage": {"action", "name", "layer", "reason", "to", "changes", "locale"}, "grant": {"name", "layer", "scope", "ttl_ms", "prompt_token"}, "revoke": {"name", "all", "session_only"}, "capabilities": nil}
 	envFields = []string{"contract", "op", "v", "session", "cwd", "host"}
 	sessionRE = regexp.MustCompile(`^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$`)
 	nameRE    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
@@ -150,7 +163,7 @@ func handle(ctx context.Context, raw []byte, b Backend, t Transport) (any, error
 	if !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) || json.Unmarshal(raw, &m) != nil || m == nil {
 		return nil, invalid("not a JSON object")
 	}
-	e, err := envelope(m)
+	e, err := envelope(m, b)
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +198,21 @@ func dispatch(ctx context.Context, e Envelope, m fields, b Backend, t Transport)
 			return nil, err
 		}
 		return b.Exec(ctx, e, r)
+	case "exec_start":
+		r, err := execRequest(m)
+		if err != nil {
+			return nil, err
+		}
+		return b.(JobBackend).ExecStart(ctx, e, r)
+	case "exec_status", "exec_stop":
+		r, err := jobRequest(m, e.Op == "exec_status")
+		if err != nil {
+			return nil, err
+		}
+		if e.Op == "exec_status" {
+			return b.(JobBackend).ExecStatus(ctx, e, r)
+		}
+		return b.(JobBackend).ExecStop(ctx, e, r)
 	case "grant":
 		if t == TransportModel {
 			return nil, refusal.New(refusal.NotModelCallable, "")
@@ -216,7 +244,7 @@ func dispatch(ctx context.Context, e Envelope, m fields, b Backend, t Transport)
 	return nil, invalid("op")
 }
 
-func envelope(m fields) (Envelope, error) {
+func envelope(m fields, b Backend) (Envelope, error) {
 	var e Envelope
 	if str(m, "contract", &e.Contract) != nil || e.Contract != Contract {
 		return e, errMismatch
@@ -224,7 +252,7 @@ func envelope(m fields) (Envelope, error) {
 	if num(m, "v", &e.V) != nil || e.V != 1 {
 		return e, errMismatch
 	}
-	if str(m, "op", &e.Op) != nil || !in(e.Op, ops) {
+	if str(m, "op", &e.Op) != nil || !(in(e.Op, ops) || (in(e.Op, jobOps) && isJobBackend(b))) {
 		return e, invalid("op")
 	}
 	allowed := append(append([]string(nil), envFields...), opFields[e.Op]...)
@@ -256,6 +284,11 @@ func envelope(m fields) (Envelope, error) {
 	return e, nil
 }
 
+func isJobBackend(b Backend) bool {
+	_, ok := b.(JobBackend)
+	return ok
+}
+
 func capabilities(info Info) any {
 	type caps struct {
 		OK             bool     `json:"ok"`
@@ -271,13 +304,18 @@ func capabilities(info Info) any {
 		Sync           bool     `json:"sync"`
 		RefusalHints   int      `json:"refusal_hints"`
 		DialogLocale   int      `json:"dialog_locale"`
+		ExecJobs       int      `json:"exec_jobs,omitempty"`
 	}
 	pb := info.PromptBackends
 	if pb == nil {
 		pb = []string{}
 	}
-	return caps{OK: true, Contract: Contract, Capabilities: Capabilities, Ops: ops, Layers: layers,
+	c := caps{OK: true, Contract: Contract, Capabilities: Capabilities, Ops: ops, Layers: layers,
 		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints, DialogLocale: DialogLocale}
+	if info.ExecJobs {
+		c.ExecJobs = ExecJobs
+	}
+	return c
 }
 
 func execRequest(m fields) (ExecRequest, error) {
@@ -310,6 +348,20 @@ func execRequest(m fields) (ExecRequest, error) {
 	if _, ok := m["shell"]; ok {
 		if str(m, "shell", &r.Shell) != nil || !in(r.Shell, shells) {
 			return r, invalid("shell")
+		}
+	}
+	return r, nil
+}
+
+// jobRequest validates exec_status (with its long poll) and exec_stop.
+func jobRequest(m fields, status bool) (JobRequest, error) {
+	var r JobRequest
+	if str(m, "job", &r.Job) != nil || !jobIDRE.MatchString(r.Job) {
+		return r, invalid("job")
+	}
+	if _, ok := m["wait_ms"]; ok {
+		if !status || num(m, "wait_ms", &r.WaitMS) != nil || r.WaitMS < 0 || r.WaitMS > MaxWaitMS {
+			return r, invalid("wait_ms")
 		}
 	}
 	return r, nil

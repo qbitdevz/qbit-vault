@@ -83,6 +83,8 @@ const (
 	HintBadRequest       = "Fix the request and call again."
 	HintCancelled        = "The call was cancelled before the user answered; call again only if the task still needs it."
 	HintNeedsRepository  = "Run it inside a repository, or ask for another scope."
+	HintJobsBusy         = "Four jobs are already running; wait for one to end with secret_exec_status, or stop one with secret_exec_stop, then start again."
+	HintUnknownJob       = "That job does not exist here: it was never started by this server, its final state was already reported, it was stopped, or its result expired. Start a new one with secret_exec_start."
 	HintNeedsSession     = "Without --session only a project grant applies; a once or session grant needs --session <host>:<id>, the id of the session it was granted to. Ask the user for a project grant, or pass --session."
 )
 

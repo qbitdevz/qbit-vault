@@ -2,6 +2,8 @@ package broker
 
 import (
 	"context"
+	"io"
+	"time"
 
 	"github.com/qbitdevz/qbit-vault/internal/refusal"
 )
@@ -224,6 +226,96 @@ type Info struct {
 	Keychain       string
 	PromptBackends []string
 	Streaming      bool
+	// ExecJobs is set by a backend that serves exec_start, exec_status and
+	// exec_stop (the MCP server); capabilities then reports `exec_jobs`.
+	ExecJobs bool
+}
+
+// JobRequest is a validated `exec_status` (WaitMS is the long poll) or
+// `exec_stop` (WaitMS is zero): Job is 32 lowercase hex digits.
+type JobRequest struct {
+	Job    string
+	WaitMS int
+}
+
+// ExecStartResponse is the `exec_start` success payload.
+type ExecStartResponse struct {
+	OK  bool   `json:"ok"`
+	Job string `json:"job"`
+}
+
+// Job states of an ExecStatusResponse.
+const (
+	JobRunning  = "running"
+	JobExited   = "exited"
+	JobTimedOut = "timed_out"
+	JobStopped  = "stopped"
+)
+
+// ExecStatusResponse is the `exec_status` and `exec_stop` success payload.
+// Stdout, Stderr, Redactions and Truncated cover the output produced since
+// the previous call for the same job. ExitCode is absent while it runs.
+type ExecStatusResponse struct {
+	OK         bool   `json:"ok"`
+	State      string `json:"state"`
+	ExitCode   *int   `json:"exit_code,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
+	Stdout     string `json:"stdout"`
+	Stderr     string `json:"stderr"`
+	Redactions int    `json:"redactions"`
+	Truncated  bool   `json:"truncated"`
+}
+
+// JobBackend is implemented by a Backend that can keep a command running
+// after the call that started it returns: the MCP server, whose process lives
+// as long as the host session. `broker --op` is one process per call and
+// does not implement it, so it answers these ops as an unknown op.
+//
+// ExecStart decides everything exec decides before a process exists, with
+// the same refusals, and returns once the command has started.
+type JobBackend interface {
+	ExecStart(ctx context.Context, e Envelope, r ExecRequest) (ExecStartResponse, error)
+	ExecStatus(ctx context.Context, e Envelope, r JobRequest) (ExecStatusResponse, error)
+	ExecStop(ctx context.Context, e Envelope, r JobRequest) (ExecStatusResponse, error)
+}
+
+// ExecOutcome is how a prepared exec ended.
+type ExecOutcome struct {
+	// Started reports whether the operating system created the child.
+	Started  bool
+	ExitCode int
+	// TimedOut: the command hit its timeout and its tree was killed.
+	TimedOut bool
+	// Interrupted: the context given to Run ended and its tree was killed.
+	Interrupted bool
+	// Failed: the run failed for another reason (the command could not
+	// start, or its output could not be read).
+	Failed   bool
+	Duration time.Duration
+}
+
+// ExecStarter is implemented by a Backend whose exec can be split into what
+// happens before a process exists and the run itself, so a job can decide
+// synchronously and run in the background through the same code as exec.
+type ExecStarter interface {
+	// PrepareExec does everything exec does before the child exists: the
+	// vault, the grants (a once grant is claimed), the dump guard, the binary
+	// rules and the audit record of the start. Its refusals are exec's. With
+	// a nil error the caller must call Close exactly once.
+	PrepareExec(ctx context.Context, e Envelope, r ExecRequest) (PreparedExec, error)
+}
+
+// PreparedExec is an exec that passed every check.
+type PreparedExec interface {
+	// Run starts the command and returns when it ends. Everything written to
+	// stdout and stderr is already redacted; when a writer implements
+	// redact.CountedWriter it also gets the replacement counts. onStart is
+	// called once, when the child exists (never, if it cannot start). ctx
+	// ends the run: the child's whole process tree is killed.
+	Run(ctx context.Context, stdout, stderr io.Writer, onStart func()) ExecOutcome
+	// Close wipes the injected values and, if the child never started, gives
+	// back the once grants claimed by PrepareExec.
+	Close()
 }
 
 // Backend implements the operations. Every method gets the validated

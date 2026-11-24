@@ -15,7 +15,7 @@ Every request and response carries:
 | Field | Req | Description |
 | --- | --- | --- |
 | `contract` | yes | Literal `qbit-vault.secrets-broker/v1` |
-| `op` | yes | One of `request`, `list`, `exec`, `manage`, `grant`, `revoke`, `capabilities` |
+| `op` | yes | One of `request`, `list`, `exec`, `manage`, `grant`, `revoke`, `capabilities`; the MCP server also serves `exec_start`, `exec_status` and `exec_stop` (§ Jobs) |
 | `v` | yes | Operation schema version, integer, currently `1` for all ops |
 | `session` | yes | Opaque host session id, `^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$` (prefix = host: `pi`, `claude`, `codex`, `cli`; the MCP server generates `mcp`) |
 | `cwd` | yes | Absolute path of the working directory; used to resolve the repository root for the project layer and the `project` scope. A linked Git worktree resolves to the root of its main clone, when the worktree and the clone name each other |
@@ -141,6 +141,45 @@ Response:
 
 `stdout`/`stderr` are capped at 1 MiB each (`truncated: true`, tail kept). Hosts with streaming (Pi) receive chunks over the CLI's `--stream` mode with the same redaction guarantees.
 
+### Jobs — `exec_start`, `exec_status`, `exec_stop` (MCP only, model-callable)
+
+A host may cancel a tool call that runs longer than its request timeout (60 s in some), and that ends the command `exec` was running. A **job** is a command that keeps running after the call that started it returns. Jobs live in the memory of the `qbit-vault mcp` process: no daemon, no job file, nothing on disk. `broker --op` is one process per call and cannot keep a command running, so it does not serve these ops: it answers them as an unknown op (`invalid request: op`), and `capabilities` reports `exec_jobs: 1` only from a backend that serves them (the MCP server).
+
+**`exec_start`** takes exactly the fields of `exec` (same limits, `locale` included) and answers as soon as the command has started:
+
+```json
+{ "ok": true, "job": "9f2c4e7a1b8d4c3e8a5f60b7d1e2c3a4" }
+```
+
+Everything `exec` decides before a process exists is decided before `exec_start` answers, by the same code, with the same refusal types, messages, hints and audit records: the unlock dialog, grants (a `once` grant is spent when the child is created, exactly as in `exec`, and given back if it cannot start), the dump guard, the binary allowlist, `unknown_secret`, `scope_binary` and the rest. `timeout_ms` bounds the job exactly as it bounds `exec` and ends it as `timed_out`. Two refusals are specific: a fifth job while four run is `internal` (retryable, message `too many running jobs`, hint below), and a start on a server that is stopping is `internal`.
+
+**`exec_status`** takes `job` (32 lowercase hex digits) and `wait_ms` (integer, 0 to 50 000, default 0). It waits up to `wait_ms` and returns early when the job ends: a long poll that stays under the 60 s some hosts allow. Output is **incremental**: `stdout` and `stderr` hold what the job produced since the previous `exec_status` or `exec_stop` call for that job, redacted exactly as in `exec`, so a caller never re-reads or loses output. A call the client cancels takes nothing and never touches the job.
+
+```json
+{ "ok": true, "state": "exited", "exit_code": 0, "duration_ms": 183204,
+  "stdout": "…redacted…", "stderr": "", "redactions": 1, "truncated": false }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `state` | `running`, `exited` (the process ended by itself), `timed_out` (`timeout_ms` passed, tree killed) or `stopped` (`exec_stop`, or the server ending) |
+| `exit_code` | Absent while `running`; otherwise the status the process ended with (after a kill, the operating system's kill status) |
+| `duration_ms` | Since the job started; fixed once it ended |
+| `stdout`, `stderr` | New redacted output since the previous call; each stream is capped at 1 MiB, tail kept |
+| `redactions` | Replacements in the output returned by this call |
+| `truncated` | `true` when output was dropped by the cap since the previous call |
+
+**`exec_stop`** takes `job` and kills the job's whole process tree (the same tree kill as a timeout). It answers like `exec_status`, with the final state and the output not read yet. Stopping a job that already ended is a no-op that returns its final state.
+
+Rules (normative):
+
+- **Visibility.** A job is visible only to the MCP session that started it. An id that is unknown, malformed, already reported, stopped, expired or another session's is the same refusal: `internal`, message `no such job`, with the hint below. A malformed id (not 32 lowercase hex digits) is `invalid request: job`.
+- **Ids** are 128 random bits from the operating system's random source, shown as 32 hex digits. They name nothing about the command.
+- **Limits.** At most 4 jobs run at once per server (a job being started counts). A finished job's unread output and final state are kept for 10 minutes after it ended, or until a call has returned the final state, whichever is first; then they are dropped, and nothing is ever written to disk.
+- **End of the server.** When the server ends for any reason (the host closed stdin, a signal, a panic), every running job's process tree is killed before the process exits. A job never outlives the server, and a child never keeps injected values alive after it. A tree that left its process group (`setsid`) is out of reach on POSIX, as for `exec`.
+- **Redaction.** Output is redacted as a stream, with `exec`'s redactor and encodings, before it is buffered for a later call. A value split across two chunks or across two calls appears in neither. The only unredacted bytes the server holds are the redactor's own carry-over, a few bytes it withholds until they can be told apart from a value.
+- **Nothing about a job** (command, output, id) is written to logs or stderr. The audit log records the start and the end like `exec`, and `interrupted` for a stopped job.
+
 ### `manage` — propose a change to the vault (model-callable, user-confirmed)
 
 The agent proposes; the user decides. Every action opens the user-facing prompt (same channel as `request`) showing the action, name, layer, the change and the reason. Nothing is applied without that confirmation.
@@ -201,6 +240,8 @@ Response:
 ```
 
 `refusal_hints: 1` is a capability row (additive, same major): the broker puts a `hint` on every refusal (and a `rule` on `dump_command`), see § Refusals. A host that does not find the row must not depend on those fields. The `capabilities` version string is unchanged.
+
+`exec_jobs: 1` is a capability row (additive, same major, issue #64), present only from a backend that serves the job ops of § Jobs, the MCP server: `exec_start`, `exec_status` and `exec_stop` exist there and nowhere else. The `ops` list is unchanged (it names the ops every transport serves).
 
 `dialog_locale: 1` is a capability row (additive, same major, issue #63): `request`, `list`, `exec` and `manage` accept the optional `locale` field below. A host that does not find the row must not send it (an older broker refuses an unknown field). The `capabilities` version string stays `1.1`.
 
@@ -267,7 +308,7 @@ Hints by type (`dump_command` takes its hint from its `rule`, below):
 | `contract_mismatch` | Update qbit-vault; the user runs 'qbit-vault sync' and restarts the agent. |
 | `internal` | Report it; the user can run 'qbit-vault doctor'. |
 
-Seven cases replace the hint of their type with another fixed text:
+Nine cases replace the hint of their type with another fixed text:
 
 - `grant_required` when a grant exists but does not apply here (another directory, or an earlier value): `A grant exists but does not apply here; call secret_request to ask the user for a new one.`
 - `vault_locked` when `exec` or `list` could show no unlock dialog (the `message` is the 1.4.0 text that names `qbit-vault unlock`): `No unlock dialog could be shown; ask the user to run 'qbit-vault unlock' in their terminal, then retry.`
@@ -276,6 +317,8 @@ Seven cases replace the hint of their type with another fixed text:
 - `internal` for a call cancelled before the user answered: `The call was cancelled before the user answered; call again only if the task still needs it.`
 - `scope_not_allowed` for a project grant outside a repository: `Run it inside a repository, or ask for another scope.`
 - `grant_required` from the command line `qbit-vault exec` run without `--session`, when no project grant applies (the `message` is `<NAME> has no project grant; a once or session grant needs --session <host>:<id>`): `Without --session only a project grant applies; a once or session grant needs --session <host>:<id>, the id of the session it was granted to. Ask the user for a project grant, or pass --session.` The broker always has a session, so an MCP or broker call never gets this one.
+- `internal` for `exec_start` with four jobs already running (`too many running jobs`, retryable): `Four jobs are already running; wait for one to end with secret_exec_status, or stop one with secret_exec_stop, then start again.`
+- `internal` for `exec_status` or `exec_stop` of a job that does not exist for this session (`no such job`): `That job does not exist here: it was never started by this server, its final state was already reported, it was stopped, or its result expired. Start a new one with secret_exec_start.`
 
 For `dump_command` the `message` is `the command is refused while secrets are injected: <phrase>`:
 
@@ -301,6 +344,12 @@ These descriptions are shipped verbatim to every host so models see the same con
 **`secret_list`** — "List the secrets available from this directory (global ones and this project's), and the rules for what you can and cannot do with them. Values are never returned. Call this first when you need a credential."
 
 **`secret_manage`** — "Propose a change to a secret: remove it, edit its metadata, move it between global and this project, or replace its value. The user confirms or declines outside the chat; nothing changes without that. You never see values and you cannot grant access. Give a concrete reason."
+
+**`secret_exec_start`** — "Start a shell command in the background with named secrets injected as environment variables for that process only, and return a job id as soon as it has started. Use this instead of secret_exec for anything that may take more than about 30 seconds (builds, test suites, deploys, migrations): a host may cancel a tool call that runs longer than its request timeout, 60 seconds in some, and that ends the command. It takes the same input as secret_exec and is refused for the same reasons with the same hints; a once grant is spent when the job starts. Then call secret_exec_status with the job id and wait_ms to read the redacted output and the exit code. At most 4 jobs run at once, and every job ends when this server stops."
+
+**`secret_exec_status`** — "Read a job started with secret_exec_start. Waits up to wait_ms (0 to 50000, default 0) and returns early when the job ends, so pass a wait_ms such as 30000 instead of polling in a loop. Returns state (running, exited, timed_out or stopped), exit_code once it ended, duration_ms, and the redacted stdout and stderr the job produced since your previous call for this job: each output is returned once, so keep what you need. A call that returns a finished state is the last one for that job; an unread result is kept for 10 minutes. Secret values are redacted as in secret_exec."
+
+**`secret_exec_stop`** — "Stop a job started with secret_exec_start: its whole process tree is killed. Returns the same fields as secret_exec_status, with the final state and any output you have not read yet. Stopping a job that already ended returns its final state. Use it for a job that is stuck or that you no longer need."
 
 **`secret_exec`** — "Run a shell command with named secrets injected as environment variables for that process only. Output is returned with secret values redacted. Commands that print the environment or a secret are refused; to use only a length, write ${#NAME}. Prefer this over asking the user to paste credentials. A refused command carries a rule and a hint saying why and what to do instead; follow the hint, because an unlocked vault or a grant does not lift a refusal."
 
