@@ -82,7 +82,7 @@ func newRestore(g *globals) *cobra.Command {
 				return usageError{"no backup " + from}
 			}
 			if !yes {
-				if err := confirmChange(ask, "Restore the vault from "+from+"? The current vault is backed up first.", usageError{"confirmation required; pass --yes"}); err != nil {
+				if err := confirmChange(ask, g.loc().T("q.restore", from), usageError{"confirmation required; pass --yes"}); err != nil {
 					return err
 				}
 			}

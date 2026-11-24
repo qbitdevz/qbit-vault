@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/qbitdevz/qbit-vault/internal/prompt"
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // invisible are characters a value almost never means to hold but a copy from
@@ -19,7 +20,7 @@ var invisible = map[rune]bool{
 // surrounding quotes and invisible characters. It returns a problem in plain
 // words and the value without them, or "" and nil when the value is clean.
 // The fixed value is a fresh slice; v is not changed.
-func valueIssues(v []byte) (problem string, fixed []byte) {
+func valueIssues(loc i18n.Locale, v []byte) (problem string, fixed []byte) {
 	// A pair only counts with something inside: `""` alone is left as typed.
 	quoted := len(v) >= 3 && v[0] == v[len(v)-1] && (v[0] == '"' || v[0] == '\'' || v[0] == '`')
 	hidden := false
@@ -38,11 +39,11 @@ func valueIssues(v []byte) (problem string, fixed []byte) {
 	}
 	switch {
 	case quoted && hidden:
-		problem = "has quotes around it and invisible characters in it"
+		problem = loc.T("problem.both")
 	case quoted:
-		problem = "has quotes around it"
+		problem = loc.T("problem.quotes")
 	case hidden:
-		problem = "has invisible characters in it"
+		problem = loc.T("problem.hidden")
 	default:
 		clear(out)
 		return "", nil
@@ -55,15 +56,15 @@ func valueIssues(v []byte) (problem string, fixed []byte) {
 // value as typed, or cancels (prompt.ErrCancelled, so callers treat it like a
 // cancelled dialog). The result is a fresh slice the caller wipes; v is not
 // changed.
-func reviewValue(ask prompt.Backend, name string, v []byte) ([]byte, error) {
-	problem, fixed := valueIssues(v)
+func reviewValue(ask prompt.Backend, loc i18n.Locale, name string, v []byte) ([]byte, error) {
+	problem, fixed := valueIssues(loc, v)
 	if problem == "" {
 		return bytes.Clone(v), nil
 	}
-	q := "The value of " + name + " " + problem + ". Most keys and tokens don't, and extra characters break logins. Which one should be saved?"
+	q := loc.T("q.value_issue", name, problem)
 	// Without the extras nothing may be left (a value of invisible characters
 	// only): then that choice is not offered, rather than saving nothing.
-	const withoutThem, asTyped, cancel = "Without them (recommended)", "Keep it as typed", "Cancel"
+	withoutThem, asTyped, cancel := loc.T("opt.without"), loc.T("opt.as_typed"), loc.T("btn.cancel")
 	opts := []string{withoutThem, asTyped, cancel}
 	if len(fixed) == 0 {
 		opts = opts[1:]

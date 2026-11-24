@@ -163,11 +163,25 @@ func askYes(b prompt.Backend, q string) error {
 
 func (g *globals) remoteOff() bool { return g.getenv(envNoRemote) == "1" }
 
+// theServer is what serverHost answers when the URL has no host.
+const theServer = "the server"
+
+// dialogHost is serverHost for a dialog, the fallback in its language.
+func (g *globals) dialogHost(server string) string { return g.hostIn(serverHost(server)) }
+
+// hostIn puts the fallback host in the dialog language.
+func (g *globals) hostIn(host string) string {
+	if host == theServer {
+		return g.loc().T("word.the_server")
+	}
+	return host
+}
+
 func serverHost(server string) string {
 	if u, err := url.Parse(server); err == nil && u.Host != "" {
 		return u.Host
 	}
-	return "the server"
+	return theServer
 }
 
 func netCtx(cmd *cobra.Command, d time.Duration) (context.Context, context.CancelFunc) {

@@ -2,18 +2,21 @@ package cli
 
 import (
 	"bytes"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/qbitdevz/qbit-vault/internal/grants"
 	"github.com/qbitdevz/qbit-vault/internal/prompt"
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 	"github.com/qbitdevz/qbit-vault/internal/vault"
 )
 
 // manualEntry is the reason of a capture the user started themselves.
 const manualEntry = "manual entry"
+
+// manualReason is manualEntry as the dialog shows it, in loc.
+func manualReason(loc i18n.Locale) string { return loc.T("reason.manual") }
 
 // scopeOrder is the order scopes are offered in.
 var scopeOrder = []grants.Scope{grants.ScopeOnce, grants.ScopeSession, grants.ScopeProject}
@@ -86,18 +89,18 @@ func agentScopes(scopes []grants.Scope) []grants.Scope {
 // scopeLabels describes scopes for a menu and returns the index preselected.
 // A scope the user typed on their own command line (userChose) wins; else
 // session when it is offered (set --grant only); else 0, once, the narrowest.
-func scopeLabels(scopes []grants.Scope, proposed grants.Scope, userChose bool) ([]string, int) {
+func scopeLabels(loc i18n.Locale, scopes []grants.Scope, proposed grants.Scope, userChose bool) ([]string, int) {
 	opts := make([]string, len(scopes))
 	at := map[grants.Scope]int{}
 	for i, sc := range scopes {
 		at[sc] = i
 		switch sc {
 		case grants.ScopeOnce:
-			opts[i] = "Once: only the next command"
+			opts[i] = loc.T("scope.once")
 		case grants.ScopeSession:
-			opts[i] = "Session: until the agent restarts (max " + ttlText(grants.DefaultSessionTTL) + ")"
+			opts[i] = loc.T("scope.session", ttlText(grants.DefaultSessionTTL))
 		default:
-			opts[i] = "Always: in this project, until you revoke it"
+			opts[i] = loc.T("scope.project")
 		}
 	}
 	if i, ok := at[proposed]; ok && userChose {
@@ -110,34 +113,34 @@ func scopeLabels(scopes []grants.Scope, proposed grants.Scope, userChose bool) (
 }
 
 // denyOption is the last choice of every permission question.
-const denyOption = "Don't allow"
+func denyOption(loc i18n.Locale) string { return loc.T("opt.deny") }
 
 // allowQuestion is the permission question: who asks, the secrets (each with
 // where it is saved), then the reason on a line of its own. The reason is the
 // agent's: made one line so it cannot add a line of the question.
-func allowQuestion(who string, secrets []string, reason string) string {
-	return who + " wants to use " + strings.Join(secrets, ", ") + ".\nWhy: " + prompt.Escape(reason)
+func allowQuestion(loc i18n.Locale, who string, names []string, reason string) string {
+	return loc.T("q.allow", who, strings.Join(names, ", "), prompt.Escape(reason))
 }
 
 // whereText is where a layer's secrets apply, in plain words.
-func whereText(l vault.Layer) string {
+func whereText(loc i18n.Locale, l vault.Layer) string {
 	if l.Project {
-		return "project " + prompt.Escape(l.Label)
+		return loc.T("val.project", prompt.Escape(l.Label))
 	}
-	return "all projects"
+	return loc.T("val.all_projects")
 }
 
 // layerOption is one answer of "Where should NAME be saved?".
-func layerOption(l vault.Layer) string {
+func layerOption(loc i18n.Locale, l vault.Layer) string {
 	if l.Project {
-		return "Only this project (" + l.Label + ")"
+		return loc.T("opt.layer_project", l.Label)
 	}
-	return "All projects"
+	return loc.T("opt.layer_all")
 }
 
 // layerOptions are the two answers, global first, for a request in project p.
-func layerOptions(p vault.Layer) []string {
-	return []string{layerOption(vault.Global()), layerOption(p)}
+func layerOptions(loc i18n.Locale, p vault.Layer) []string {
+	return []string{layerOption(loc, vault.Global()), layerOption(loc, p)}
 }
 
 // layerRequest is how the prompt names the project of a layer: its label, or
@@ -153,7 +156,7 @@ func layerRequest(layer vault.Layer) string {
 // drop pasted quotes or invisible characters (reviewValue). The caller wipes
 // the returned bytes, the trimmed value. Blank and oversized input are usage
 // errors; nothing has been written either way.
-func askValue(ask prompt.Backend, req prompt.SecretRequest, hint string) ([]byte, error) {
+func askValue(ask prompt.Backend, loc i18n.Locale, req prompt.SecretRequest, hint string) ([]byte, error) {
 	sec, err := ask.Secret(req)
 	if err != nil {
 		return nil, promptFail(err, hint)
@@ -168,7 +171,7 @@ func askValue(ask prompt.Backend, req prompt.SecretRequest, hint string) ([]byte
 	case len(v) > maxValueBytes:
 		return nil, usageError{"value too large"}
 	}
-	reviewed, err := reviewValue(ask, req.Name, v)
+	reviewed, err := reviewValue(ask, loc, req.Name, v)
 	if err != nil {
 		return nil, promptFail(err, hint)
 	}
@@ -180,8 +183,9 @@ func askValue(ask prompt.Backend, req prompt.SecretRequest, hint string) ([]byte
 // the returned bytes. Nothing has been written when it fails, so a cancel
 // leaves the vault as it was (R-CAP-04).
 func (g *globals) captureValue(ask prompt.Backend, name string, layer vault.Layer, existing bool, flagScope grants.Scope, sensitive bool) ([]byte, grants.Scope, error) {
-	raw, err := askValue(ask, prompt.SecretRequest{
-		Name: name, Reason: manualEntry, Host: "cli", Session: g.Session,
+	loc := g.loc()
+	raw, err := askValue(ask, loc, prompt.SecretRequest{
+		Name: name, Reason: manualReason(loc), Host: "cli", Session: g.Session,
 		Project: layerRequest(layer), Existing: existing,
 	}, "use --stdin")
 	if err != nil {
@@ -191,9 +195,9 @@ func (g *globals) captureValue(ask prompt.Backend, name string, layer vault.Laye
 		return raw, "", nil
 	}
 	scopes := g.allowedScopes(name, layer, sensitive, scopeOrder)
-	opts, def := scopeLabels(scopes, flagScope, flagScope != "")
-	opts = append(opts, "Save it, don't allow yet")
-	i, err := ask.Choose(fmt.Sprintf("Allow agents to use %s (%s) right away?", name, whereText(layer)), opts, def)
+	opts, def := scopeLabels(loc, scopes, flagScope, flagScope != "")
+	opts = append(opts, loc.T("opt.save_only"))
+	i, err := ask.Choose(loc.T("q.allow_now", name, whereText(loc, layer)), opts, def)
 	if err != nil {
 		clear(raw)
 		return nil, "", promptFail(err, "use --stdin")

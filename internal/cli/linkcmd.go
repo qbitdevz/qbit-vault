@@ -64,7 +64,7 @@ func newLink(g *globals) *cobra.Command {
 			if err != nil {
 				return refusal.New(refusal.NotModelCallable, "")
 			}
-			yes, err := ask.Confirm(fmt.Sprintf("Use the secrets of project %s in %s?", label, root))
+			yes, err := ask.Confirm(g.loc().T("q.link", label, root))
 			switch {
 			case errors.Is(err, prompt.ErrUnavailable):
 				return refusal.New(refusal.NotModelCallable, "")

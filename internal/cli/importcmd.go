@@ -100,13 +100,14 @@ func newImport(g *globals) *cobra.Command {
 			}
 			src := &importSource{values: map[string][]byte{}}
 			defer src.wipe()
-			from := "the environment"
+			loc := g.loc()
+			from := loc.T("word.env")
 			if envGiven {
 				if err := g.readEnv(src, cleanList(strings.Split(fromEnv, ","))); err != nil {
 					return err
 				}
 			} else {
-				from = "the dotenv file"
+				from = loc.T("word.dotenv")
 				if err := readDotenv(src, fromFile, cleanList(names)); err != nil {
 					return err
 				}
@@ -137,7 +138,7 @@ func newImport(g *globals) *cobra.Command {
 				if err != nil {
 					return orInstead(err, usageError{"confirmation required; pass --yes"})
 				}
-				q := fmt.Sprintf("Import %s from %s into %s? Existing secrets with these names are replaced.", strings.Join(src.order, ", "), from, whereText(layer))
+				q := loc.T("q.import", strings.Join(src.order, ", "), from, whereText(loc, layer))
 				if err := confirmChange(b, q, usageError{"confirmation required; pass --yes"}); err != nil {
 					return err
 				}
@@ -172,7 +173,7 @@ func newImport(g *globals) *cobra.Command {
 				del := removeSource
 				if !del && !yes {
 					if b, err := backend(); err == nil {
-						del, _ = b.Confirm("Delete the dotenv file now that its values are in the vault?")
+						del, _ = b.Confirm(loc.T("q.delete_dotenv"))
 					}
 				}
 				if del {
@@ -317,7 +318,7 @@ func (g *globals) importLayer(lf layerFlags, cwd string, backend func() (prompt.
 	if err != nil {
 		return vault.Layer{}, orInstead(err, usageError{"choose --global or --project"})
 	}
-	i, err := b.Choose("Where should these secrets live?", layerOptions(proj), 0)
+	i, err := b.Choose(g.loc().T("q.where_these"), layerOptions(g.loc(), proj), 0)
 	if err != nil {
 		return vault.Layer{}, orInstead(err, usageError{"choose --global or --project"})
 	}

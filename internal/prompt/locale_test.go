@@ -318,3 +318,31 @@ func TestHeaderInEnglishIsTheOldText(t *testing.T) {
 		t.Error("HeaderIn(es) is English")
 	}
 }
+
+// Every option an agent question offers is recognised as a permission in its
+// language, so the dialog gets its heading (and the warning icon of a removal
+// follows the same words); a drifting translation fails here.
+func TestPermissionAndRemovalMarkersCoverTheQuestions(t *testing.T) {
+	for _, loc := range []i18n.Locale{i18n.En, i18n.Es} {
+		for _, id := range []string{"opt.deny", "opt.save_only", "opt.replace_once", "opt.replace_ask", "opt.dont_replace"} {
+			if !isPermission(loc, []string{loc.T(id)}) {
+				t.Errorf("%s: %q (%q) is not recognised as a permission option", loc, id, loc.T(id))
+			}
+		}
+		for _, id := range []string{"scope.once", "scope.project", "opt.layer_all", "opt.without", "opt.as_typed"} {
+			if isPermission(loc, []string{loc.T(id, "x")}) {
+				t.Errorf("%s: %q is taken for a permission option", loc, id)
+			}
+		}
+		for _, q := range []string{loc.T("q.remove", "A", "x"), loc.T("q.delete_dotenv"), loc.T("q.manage", "Pi", loc.T("what.remove", "A", "x"), "r")} {
+			if !confirmDialog(loc, q).removal() {
+				t.Errorf("%s: %q is not recognised as a removal", loc, q)
+			}
+		}
+		for _, q := range []string{loc.T("q.link", "p", "/x"), loc.T("q.update", "1", "2"), loc.T("q.restore", "b"), loc.T("q.manage", "Pi", loc.T("what.replace", "A", "x"), "r"), loc.T("q.overwrite", "A", "x")} {
+			if confirmDialog(loc, q).removal() {
+				t.Errorf("%s: %q is taken for a removal", loc, q)
+			}
+		}
+	}
+}

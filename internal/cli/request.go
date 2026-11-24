@@ -50,6 +50,7 @@ func (b *cliBackend) Request(ctx context.Context, e broker.Envelope, r broker.Re
 	g := b.bound(e)
 	g.ctx = ctx
 	g.unlock = agentUnlock{layer: r.SuggestedLayer}
+	loc := g.loc()
 	for _, f := range r.Fields {
 		g.unlock.names = append(g.unlock.names, f.Name)
 	}
@@ -141,7 +142,7 @@ func (b *cliBackend) Request(ctx context.Context, e broker.Envelope, r broker.Re
 		if r.SuggestedLayer == "project" {
 			def = 1
 		}
-		i, err := ask.Choose("Where should "+strings.Join(namesOf(fresh), ", ")+" be saved?", layerOptions(proj), def)
+		i, err := ask.Choose(loc.T("q.where_saved", strings.Join(namesOf(fresh), ", ")), layerOptions(loc, proj), def)
 		if err != nil {
 			return broker.RequestResponse{}, fail(err)
 		}
@@ -198,7 +199,7 @@ func (b *cliBackend) Request(ctx context.Context, e broker.Envelope, r broker.Re
 		case len(a.value) > maxValueBytes:
 			return broker.RequestResponse{}, refusal.New(refusal.Internal, "").WithMessage("value too large")
 		}
-		reviewed, err := reviewValue(ask, a.f.Name, a.value)
+		reviewed, err := reviewValue(ask, loc, a.f.Name, a.value)
 		clear(a.value)
 		if err != nil {
 			return broker.RequestResponse{}, fail(err)
@@ -219,16 +220,16 @@ func (b *cliBackend) Request(ctx context.Context, e broker.Envelope, r broker.Re
 	if len(scopes) == 0 {
 		return broker.RequestResponse{}, refusal.New(refusal.ScopeNotAllowed, firstName(fields))
 	}
-	opts, def := scopeLabels(scopes, "", false)
+	opts, def := scopeLabels(loc, scopes, "", false)
 	var who []string
 	for _, a := range fields {
 		if a.exists && len(fields) > 1 {
-			who = append(who, fmt.Sprintf("%s (%s, already saved)", a.f.Name, whereText(a.layer)))
+			who = append(who, loc.T("q.allow_saved", a.f.Name, whereText(loc, a.layer)))
 		} else {
-			who = append(who, fmt.Sprintf("%s (%s)", a.f.Name, whereText(a.layer)))
+			who = append(who, fmt.Sprintf("%s (%s)", a.f.Name, whereText(loc, a.layer)))
 		}
 	}
-	i, err := ask.Choose(allowQuestion(prompt.Requester(hostOf(e.Session), ""), who, r.Reason), append(opts, denyOption), def)
+	i, err := ask.Choose(allowQuestion(loc, prompt.RequesterIn(loc, hostOf(e.Session), ""), who, r.Reason), append(opts, denyOption(loc)), def)
 	if err != nil {
 		return broker.RequestResponse{}, fail(err)
 	}

@@ -206,7 +206,7 @@ func (g *globals) rotateOnce(ctx context.Context, cmd *cobra.Command, s *session
 	}
 	g.record(cmd.ErrOrStderr(), audit.Record{Event: audit.EventRekey, Detail: fmt.Sprintf("remote generation %d", gen)})
 
-	if err := confirmRecoveryKey(ask, show, rkText); err != nil {
+	if err := confirmRecoveryKey(ask, show, g.loc(), rkText); err != nil {
 		return rotated{generation: gen}, false, err
 	}
 	st.RecoveryUnconfirmed = false
@@ -260,12 +260,11 @@ func newRemoteRevokeDevice(g *globals) *cobra.Command {
 			case d.RevokedAt != nil:
 				return errRevokeAlready
 			}
-			last := "never"
+			last := g.loc().T("word.never")
 			if d.LastSync != nil {
 				last = oneLine(d.LastSync.At)
 			}
-			host := serverHost(st.Server)
-			if err := askYes(ask, fmt.Sprintf("Revoke device %s (last sync %s) on %s? It will lose access to the synced vault; the account key and the recovery key will be replaced.", oneLine(d.Label), last, host)); err != nil {
+			if err := askYes(ask, g.loc().T("q.revoke_device", oneLine(d.Label), last, g.dialogHost(st.Server))); err != nil {
 				return err
 			}
 			res, err := g.rotateAccount(cmd, s, ask, show, id)
@@ -317,7 +316,7 @@ func newRemoteRecoveryKey(g *globals) *cobra.Command {
 			if g.remoteOff() {
 				return errRemoteOff
 			}
-			if err := askYes(ask, "Replace the recovery key for your vault on "+serverHost(st.Server)+"? The old recovery key stops working."); err != nil {
+			if err := askYes(ask, g.loc().T("q.replace_recovery", g.dialogHost(st.Server))); err != nil {
 				return err
 			}
 			if err := g.rotateRecovery(cmd, s, st, ask, show); err != nil {
@@ -377,7 +376,7 @@ func (g *globals) rotateRecovery(cmd *cobra.Command, s *session, st *vault.Remot
 		}
 		return g.remoteFail(err, "this device was refused by the server")
 	}
-	if err := confirmRecoveryKey(ask, show, rkText); err != nil {
+	if err := confirmRecoveryKey(ask, show, g.loc(), rkText); err != nil {
 		return err
 	}
 	st.RecoveryUnconfirmed = false

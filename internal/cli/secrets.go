@@ -366,7 +366,7 @@ func newSet(g *globals) *cobra.Command {
 				case perr == nil && stdin:
 					return usageError{"choose --global or --project"}
 				case perr == nil:
-					i, err := ask.Choose("Where should "+name+" live?", layerOptions(proj), 0)
+					i, err := ask.Choose(g.loc().T("q.where_live", name), layerOptions(g.loc(), proj), 0)
 					if err != nil {
 						return promptFail(err, "use --stdin")
 					}
@@ -541,7 +541,7 @@ func newRm(g *globals) *cobra.Command {
 			}
 			e.Record.Value.Wipe()
 			if !yes {
-				if err := confirmChange(ask, fmt.Sprintf("Remove %s (%s)?", name, whereText(e.Layer)), usageError{"confirmation required; pass --yes"}); err != nil {
+				if err := confirmChange(ask, g.loc().T("q.remove", name, whereText(g.loc(), e.Layer)), usageError{"confirmation required; pass --yes"}); err != nil {
 					return err
 				}
 			}

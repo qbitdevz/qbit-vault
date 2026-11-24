@@ -154,7 +154,7 @@ func runUpdate(cmd *cobra.Command, g *globals, check bool) error {
 	if err != nil {
 		return refusal.New(refusal.NotModelCallable, "")
 	}
-	ok, err := ask.Confirm(fmt.Sprintf("Update QBit Vault %s to %s?", current, rel.Tag))
+	ok, err := ask.Confirm(g.loc().T("q.update", current, rel.Tag))
 	switch {
 	case errors.Is(err, prompt.ErrUnavailable):
 		return refusal.New(refusal.NotModelCallable, "")

@@ -189,11 +189,12 @@ func (g *globals) confirm(cmd *cobra.Command, s *session, req grants.Request, la
 		}
 		return "", mapErr(err, "")
 	}
-	who := "this project"
+	loc := g.loc()
+	who := loc.T("grant.this_project")
 	if req.Scope != grants.ScopeProject {
 		who = req.Session
 	}
-	ok, err := b.Confirm(fmt.Sprintf("Grant %s (%s) to %s, scope %s?", req.Name, whereText(layer), who, req.Scope))
+	ok, err := b.Confirm(loc.T("q.grant", req.Name, whereText(loc, layer), who, req.Scope))
 	switch {
 	case errors.Is(err, prompt.ErrUnavailable):
 		return "", refusal.New(refusal.NotModelCallable, req.Name)

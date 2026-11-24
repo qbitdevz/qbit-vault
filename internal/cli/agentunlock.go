@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/qbitdevz/qbit-vault/internal/audit"
@@ -39,7 +38,8 @@ type agentUnlock struct {
 // layer is named only when the caller states it: a locked vault cannot say
 // where a name lives.
 func (g *globals) unlockReason(names []string, layer string) string {
-	who := limitRunes(prompt.Requester(hostOf(g.Session), ""), maxUnlockWho)
+	loc := g.loc()
+	who := limitRunes(prompt.RequesterIn(loc, hostOf(g.Session), ""), maxUnlockWho)
 	var valid []string
 	for _, n := range names {
 		if vault.ValidName(n) {
@@ -47,16 +47,16 @@ func (g *globals) unlockReason(names []string, layer string) string {
 		}
 	}
 	if len(valid) == 0 {
-		return who + " needs the vault. Unlock it to continue."
+		return loc.T("unlock.none", who)
 	}
 	what := strings.Join(valid[:min(len(valid), maxUnlockNames)], ", ")
 	if more := len(valid) - maxUnlockNames; more > 0 {
-		what += " and " + strconv.Itoa(more) + " more"
+		what = loc.T("unlock.more", what, more)
 	}
 	if layer == "global" || layer == "project" {
 		what += " (" + layer + ")"
 	}
-	return who + " wants to use " + what + ". Unlock the vault to continue."
+	return loc.T("unlock.wants", who, what)
 }
 
 // The dialog text is bounded: the requester comes from the caller's session

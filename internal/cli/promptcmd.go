@@ -141,6 +141,7 @@ func newPromptCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return promptFail(err, "")
 			}
+			loc := g.loc()
 			cwd, err := getwd()
 			if err != nil {
 				return err
@@ -184,9 +185,9 @@ func newPromptCmd(g *globals) *cobra.Command {
 			if len(avail) > 1 {
 				opts := make([]string, len(avail))
 				for i, l := range avail {
-					opts[i] = layerOption(l)
+					opts[i] = layerOption(loc, l)
 				}
-				i, err := ask.Choose("Where should "+name+" be saved?", opts, 0)
+				i, err := ask.Choose(loc.T("q.where_saved", name), opts, 0)
 				if err != nil {
 					return promptFail(err, "")
 				}
@@ -228,7 +229,7 @@ func newPromptCmd(g *globals) *cobra.Command {
 
 			var raw []byte
 			if withValue {
-				raw, err = askValue(ask, prompt.SecretRequest{
+				raw, err = askValue(ask, loc, prompt.SecretRequest{
 					Name: name, Reason: reason, Host: hostOf(g.Session), Session: g.Session,
 					Project: layerRequest(layerChoice), Existing: exists,
 				}, "")
@@ -243,9 +244,9 @@ func newPromptCmd(g *globals) *cobra.Command {
 				}
 			}
 
-			opts, def := scopeLabels(allowed, "", false)
-			opts = append(opts, denyOption)
-			i, err := ask.Choose(allowQuestion(prompt.Requester(hostOf(g.Session), ""), []string{name + " (" + whereText(layerChoice) + ")"}, reason), opts, def)
+			opts, def := scopeLabels(loc, allowed, "", false)
+			opts = append(opts, denyOption(loc))
+			i, err := ask.Choose(allowQuestion(loc, prompt.RequesterIn(loc, hostOf(g.Session), ""), []string{name + " (" + whereText(loc, layerChoice) + ")"}, reason), opts, def)
 			if err != nil {
 				return promptFail(err, "")
 			}

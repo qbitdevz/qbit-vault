@@ -88,7 +88,7 @@ func (g *globals) rekeySynced(cmd *cobra.Command, s *session, st *vault.Remote) 
 	if g.remoteOff() {
 		return errRemoteOff
 	}
-	if err := askYes(ask, "Rotate the master key of your vault on "+serverHost(st.Server)+"? Every device switches to the new key, and the recovery key is replaced."); err != nil {
+	if err := askYes(ask, g.loc().T("q.rekey", g.dialogHost(st.Server))); err != nil {
 		return err
 	}
 	res, err := g.rotateAccount(cmd, s, ask, show, "")
