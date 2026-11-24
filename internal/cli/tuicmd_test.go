@@ -36,7 +36,7 @@ Available Commands:
   link        Bind a project layer synced from another device to this repository
   list        List secret names and metadata (never values)
   lock        Passphrase mode: drop the cached master key
-  mcp         Serve the four secret tools over stdio MCP (host plumbing)
+  mcp         Serve the seven secret tools over stdio MCP (host plumbing)
   mv          Move a secret between the global layer and the current project
   prompt      Ask the user to allow a secret and print a prompt token (host plumbing)
   rekey       Rotate the master key

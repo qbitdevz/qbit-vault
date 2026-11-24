@@ -557,6 +557,17 @@ func (x *execRun) run(ctx context.Context) (runner.Result, error) {
 	return res, runErr
 }
 
+// dropVault wipes what a command that is already running no longer needs from
+// this process: the vault key and the stored values (the child has its
+// copies in its environment, the redactor its own). Only the once grants of a
+// command that never started need the session, and that is not this case.
+func (x *execRun) dropVault() {
+	wipeEntries(x.recs)
+	if x.s != nil {
+		x.s.close()
+	}
+}
+
 // close gives back the once grants of a command that never started, then
 // wipes the values, the redactor and the vault key. A failed prepareExec
 // calls it itself.
