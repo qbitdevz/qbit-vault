@@ -43,11 +43,11 @@ func (f *fake) Revoke(_ context.Context, e Envelope, r RevokeRequest) (RevokeRes
 	return RevokeResponse{OK: true, Revoked: 2}, f.err
 }
 func (f *fake) Request(_ context.Context, e Envelope, _ RequestRequest) (RequestResponse, error) {
-	f.calls = append(f.calls, "request")
+	f.calls, f.env = append(f.calls, "request"), e
 	return RequestResponse{}, refusal.New(refusal.Internal, "").WithMessage("request is not available yet")
 }
 func (f *fake) Manage(_ context.Context, e Envelope, _ ManageRequest) (ManageResponse, error) {
-	f.calls = append(f.calls, "manage")
+	f.calls, f.env = append(f.calls, "manage"), e
 	return ManageResponse{}, refusal.New(refusal.Internal, "").WithMessage("manage is not available yet")
 }
 func (f *fake) Info() Info {
@@ -140,7 +140,7 @@ func TestErrorsNeverEchoInput(t *testing.T) {
 
 func TestCapabilities(t *testing.T) {
 	got := string(Handle(context.Background(), []byte(env("capabilities", "")), &fake{}, TransportHost))
-	want := `{"ok":true,"contract":"qbit-vault.secrets-broker/v1","capabilities":"1.1","ops":["request","list","exec","manage","grant","revoke","capabilities"],"layers":["global","project"],"prompt_backends":["zenity","tty"],"field_kinds":["secret","text"],"max_fields":8,"keychain":"secret-service","streaming":true,"sync":false,"refusal_hints":1}` + "\n"
+	want := `{"ok":true,"contract":"qbit-vault.secrets-broker/v1","capabilities":"1.1","ops":["request","list","exec","manage","grant","revoke","capabilities"],"layers":["global","project"],"prompt_backends":["zenity","tty"],"field_kinds":["secret","text"],"max_fields":8,"keychain":"secret-service","streaming":true,"sync":false,"refusal_hints":1,"dialog_locale":1}` + "\n"
 	if got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

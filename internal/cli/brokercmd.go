@@ -101,7 +101,7 @@ func (b *cliBackend) bound(e broker.Envelope) *globals {
 
 func (b *cliBackend) hot(e broker.Envelope) *globals {
 	c := *b.g
-	c.Session, c.JSON, c.cwd, c.broker = e.Session, true, e.Cwd, true
+	c.Session, c.JSON, c.cwd, c.broker, c.dialogLocale = e.Session, true, e.Cwd, true, e.Locale
 	c.execStdin = bytes.NewReader(nil)
 	return &c
 }

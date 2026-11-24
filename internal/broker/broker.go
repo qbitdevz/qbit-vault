@@ -31,6 +31,9 @@ const (
 	// RefusalHints is the capability row for the optional refusal fields
 	// `hint`, `rule` and `segment` (CONTRACT.md § Refusals).
 	RefusalHints = 1
+	// DialogLocale is the capability row for the optional `locale` field of
+	// request, list, exec and manage (CONTRACT.md § Dialog language).
+	DialogLocale = 1
 	// MaxRequestBytes bounds one request.
 	MaxRequestBytes = 64 << 10
 
@@ -70,7 +73,7 @@ const (
 
 var (
 	ops       = []string{"request", "list", "exec", "manage", "grant", "revoke", "capabilities"}
-	opFields  = map[string][]string{"request": {"name", "fields", "reason", "suggested_scope", "suggested_layer"}, "list": nil, "exec": {"command", "secrets", "timeout_ms", "shell"}, "manage": {"action", "name", "layer", "reason", "to", "changes"}, "grant": {"name", "layer", "scope", "ttl_ms", "prompt_token"}, "revoke": {"name", "all", "session_only"}, "capabilities": nil}
+	opFields  = map[string][]string{"request": {"name", "fields", "reason", "suggested_scope", "suggested_layer", "locale"}, "list": {"locale"}, "exec": {"command", "secrets", "timeout_ms", "shell", "locale"}, "manage": {"action", "name", "layer", "reason", "to", "changes", "locale"}, "grant": {"name", "layer", "scope", "ttl_ms", "prompt_token"}, "revoke": {"name", "all", "session_only"}, "capabilities": nil}
 	envFields = []string{"contract", "op", "v", "session", "cwd", "host"}
 	sessionRE = regexp.MustCompile(`^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$`)
 	nameRE    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
@@ -243,6 +246,13 @@ func envelope(m fields) (Envelope, error) {
 		}
 		e.Host = h
 	}
+	if raw, ok := m["locale"]; ok {
+		// Only the ops that open a dialog list it (opFields). Any string goes
+		// through; whoever resolves it ignores what names no language.
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || str(m, "locale", &e.Locale) != nil {
+			return e, invalid("locale")
+		}
+	}
 	return e, nil
 }
 
@@ -260,13 +270,14 @@ func capabilities(info Info) any {
 		Streaming      bool     `json:"streaming"`
 		Sync           bool     `json:"sync"`
 		RefusalHints   int      `json:"refusal_hints"`
+		DialogLocale   int      `json:"dialog_locale"`
 	}
 	pb := info.PromptBackends
 	if pb == nil {
 		pb = []string{}
 	}
 	return caps{OK: true, Contract: Contract, Capabilities: Capabilities, Ops: ops, Layers: layers,
-		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints}
+		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints, DialogLocale: DialogLocale}
 }
 
 func execRequest(m fields) (ExecRequest, error) {

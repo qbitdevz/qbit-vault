@@ -66,15 +66,19 @@ type requestIn struct {
 	Reason         string         `json:"reason" jsonschema:"what command needs it and what for, shown to the user verbatim"`
 	SuggestedScope string         `json:"suggested_scope,omitempty" jsonschema:"once, session or project; a hint, the user chooses"`
 	SuggestedLayer string         `json:"suggested_layer,omitempty" jsonschema:"global or project; a hint, the user chooses"`
+	Locale         string         `json:"locale,omitempty" jsonschema:"BCP 47 tag of the conversation language, e.g. es-ES; the dialogs the user sees are shown in it. Always send it."`
 }
 
-type listIn struct{}
+type listIn struct {
+	Locale string `json:"locale,omitempty" jsonschema:"BCP 47 tag of the conversation language, e.g. es-ES; the dialogs the user sees are shown in it. Always send it."`
+}
 
 type execIn struct {
 	Command   string              `json:"command" jsonschema:"the shell command to run"`
 	Secrets   []broker.ExecSecret `json:"secrets" jsonschema:"secrets to inject: name is the variable, from the vault secret (default name)"`
 	TimeoutMS int                 `json:"timeout_ms,omitempty" jsonschema:"1000 to 3600000, default 600000"`
 	Shell     string              `json:"shell,omitempty" jsonschema:"auto, sh, bash, cmd or pwsh"`
+	Locale    string              `json:"locale,omitempty" jsonschema:"BCP 47 tag of the conversation language, e.g. es-ES; the dialogs the user sees are shown in it. Always send it."`
 }
 
 type manageIn struct {
@@ -84,6 +88,7 @@ type manageIn struct {
 	Reason  string                `json:"reason" jsonschema:"why, shown to the user verbatim"`
 	To      string                `json:"to,omitempty" jsonschema:"move only: the other layer"`
 	Changes *broker.ManageChanges `json:"changes,omitempty" jsonschema:"edit only: description, binaries, hosts, sensitive"`
+	Locale  string                `json:"locale,omitempty" jsonschema:"BCP 47 tag of the conversation language, e.g. es-ES; the dialogs the user sees are shown in it. Always send it."`
 }
 
 // NewServer builds the MCP server over a broker backend.

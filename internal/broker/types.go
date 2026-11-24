@@ -14,6 +14,11 @@ type Envelope struct {
 	Session  string `json:"session"`
 	Cwd      string `json:"cwd"`
 	Host     *Host  `json:"host,omitempty"`
+	// Locale is the optional BCP 47 tag of the conversation language that
+	// request, list, exec and manage may carry (CONTRACT.md § Dialog
+	// language). It is the caller's raw text: whoever resolves it ignores a
+	// tag that names no language, and nothing ever shows, logs or echoes it.
+	Locale string `json:"-"`
 }
 
 // Host names the calling host, for audit.

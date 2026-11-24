@@ -7,6 +7,7 @@ import (
 	"github.com/qbitdevz/qbit-vault/internal/exitcode"
 	"github.com/qbitdevz/qbit-vault/internal/keychain"
 	"github.com/qbitdevz/qbit-vault/internal/prompt"
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 	"github.com/qbitdevz/qbit-vault/internal/refusal"
 	"github.com/qbitdevz/qbit-vault/internal/secret"
 )
@@ -17,10 +18,18 @@ import (
 // the process stdin (L3).
 var newPrompt = func(g *globals) (prompt.Backend, error) { return prompt.Select(g.getenv) }
 
+// loc is the language of the dialogs this command shows: the agent call's
+// locale, then QBIT_VAULT_LOCALE, then the system locale, then English
+// (docs/CLI.md § Dialog language). Anything that names no language is skipped.
+func (g *globals) loc() i18n.Locale { return i18n.Resolve(g.dialogLocale, g.getenv) }
+
 func (g *globals) backend() (prompt.Backend, error) {
 	b, err := newPrompt(g)
 	if err == nil && g.ctx != nil {
 		b = prompt.Bind(g.ctx, b)
+	}
+	if err == nil {
+		b = prompt.BindLocale(b, g.loc())
 	}
 	return b, err
 }
