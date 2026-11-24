@@ -123,6 +123,7 @@ Backups are pruned to the last 20 snapshots (a constant; `config.backups_keep` i
 | `backups/**` | 0600 | owner-only ACL |
 | `remote/`, `keys/` | 0700 | owner-only ACL |
 | `remote/*.enc`, `keys/retired.enc` | 0600 | owner-only ACL |
+| `usage.enc` | 0600 | owner-only ACL |
 | `bindings.yaml`, `dumpguard.yaml`, `config.yaml` (optional; `init` creates none of them) | 0600 | owner-only ACL |
 
 `doctor` reports any file whose mode is wider than this.
@@ -223,7 +224,7 @@ If someone copies the whole `$QBIT_VAULT_HOME` (a stolen backup, a synced folder
 | `audit.jsonl` | yes | secret **names**, layers, sessions, redacted commands, timestamps. Never values. |
 | `audit.head` | yes | the sequence number and hash of the newest audit record. No names, no values. |
 | `state.json`, `config.yaml`, `bindings.yaml`, `dumpguard.yaml` | yes | installed hosts, versions, settings, device id and, with sync, server URL, account id, generation and version. No names, no values. |
-| `remote/device.enc`, `remote/base.enc`, `keys/retired.enc` | no (AEAD) | format, write counter |
+| `remote/device.enc`, `remote/base.enc`, `keys/retired.enc`, `usage.enc` | no (AEAD) | format, write counter |
 
 In keychain mode the key never sits in the directory; it lives in the OS keychain, unlocked only by the user's login session. The audit log stays cleartext on purpose: it is append-only and must be verifiable (`audit --verify`) even when the vault is locked or corrupt. Hiding names in the audit log too (keyed hashes) is a v2 candidate, see `ROADMAP.md`.
 
@@ -266,6 +267,10 @@ Only present once the vault syncs. Both use the `vault.enc` envelope with their 
 | `remote/base.enc` | `qbit-vault-base/1` | the body of the last remote version this device agreed with, the base of the three-way merge |
 
 A missing or unreadable `base.enc` makes the next round merge with an empty base: nothing is lost, and keys changed on both sides become conflicts. A missing `device.enc` turns sync off with `remote_auth` until `remote join` runs again.
+
+## Usage file: `usage.enc`
+
+The last use of each record on this device (issue #62). `{"records": {"<record id>": {"last_used_at": "…", "last_exit_code": 0, "last_ok_at": "…"}}}` in the `vault.enc` envelope (`format: "qbit-vault-usage/1"`, sealed with the master key, written atomically under `vault.lock` with the steps above, owner-only). It is **not** in `vault.enc`: an `exec` never writes the vault, never takes a snapshot and never starts a sync round, which is why the history is a file of its own. It is local to the device: not synced, not in backups or snapshots, not in the export file, and a file older binaries do not know and ignore. Entries are keyed by the **record id**, so a replaced or reverted value (new id) starts with no history, and entries of records that no longer exist are dropped on every write (the file is as large as the vault at most). It holds a time and a number per record and never the command, its arguments or output, the directory, the session or a value. It is written by every path that injects: `qbit-vault exec`, the contract `exec`, and a job when it ends; when the vault key was already dropped (a job or an MCP `exec`), the vault is reopened without asking, so in passphrase mode with no unlock cache that use is not recorded. A failure to read or write the file never fails a command or changes its output or exit code: it leaves a `warning` audit record (`detail: "usage not recorded"`), `doctor` warns when the file cannot be trusted (`usage.enc is unreadable`), and an unreadable file is empty history that the next use replaces. `rekey` re-seals it with the new key (best effort: losing it loses only this history), `uninstall --purge` removes it with the vault home, and deleting it is always safe.
 
 ## Retired keys
 
