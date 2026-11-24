@@ -50,6 +50,10 @@ type globals struct {
 	// (the envelope's `locale`); "" for the CLI. It is only ever resolved by
 	// loc and never shown, logged or audited.
 	dialogLocale string
+	// searched is the human-only note of an unknown_secret that exec raised:
+	// which layers were searched (issue #64). It holds a project label, so it
+	// is printed on the terminal only, never in a refusal, JSON or the audit.
+	searched string
 	// unlock is what an agent call tells the passphrase dialog it may open
 	// (agentunlock.go); the zero value asks for the vault with no name.
 	unlock  agentUnlock
@@ -129,7 +133,11 @@ func execute(args []string, stdout, stderr io.Writer, getenv func(string) string
 	case errors.As(err, &ue):
 		return report(stdout, stderr, asJSON, "usage", ue.msg, exitcode.Usage)
 	case errors.As(err, &rf):
-		code = reportRefusal(stdout, stderr, asJSON, rf)
+		shown := rf
+		if rf.Type == refusal.UnknownSecret && !asJSON {
+			shown = rf.WithMessage(rf.Message + g.searched)
+		}
+		code = reportRefusal(stdout, stderr, asJSON, shown)
 		g.recordRefusal(stderr, rf)
 		return code
 	case errors.As(err, &ce):

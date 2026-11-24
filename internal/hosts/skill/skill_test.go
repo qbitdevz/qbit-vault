@@ -303,3 +303,30 @@ func TestSkillAsksForTheConversationLanguage(t *testing.T) {
 		}
 	}
 }
+
+// Issue #64: the skill states the real limit and the supported route for a
+// long command, and does not send the agent to a detached-job detour.
+func TestSkillStatesTheLimitAndTheRouteForLongCommands(t *testing.T) {
+	s := string(skill.Content)
+	for _, want := range []string{
+		"## Long commands",
+		"the host's own request timeout",
+		"`timeout_ms` only bounds the command",
+		"Do not start a job with `setsid`, `nohup` or `&`",
+		"`qbit-vault exec --secret NAME -- <command>`",
+		"Pass no `--session`",
+		"only a project grant applies",
+		"linked Git worktrees",
+		"`secret_request`",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
+		}
+	}
+	// Mentioned only to forbid it: never as a recipe.
+	for _, bad := range []string{"setsid nohup", "nohup qbit-vault", "setsid qbit-vault"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("skill recommends %q", bad)
+		}
+	}
+}

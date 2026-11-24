@@ -37,6 +37,13 @@ An `exec` that runs but gets `401`, `403`, "invalid token" or "authentication fa
 3. Propose **one** `secret_manage` replace with that in the reason. qbit-vault points out pasted quotes or invisible characters before saving, which is a common cause.
 4. If the new value is rejected too, stop and report what the service answered; do not ask again.
 
+## Long commands
+
+A `secret_exec` call lasts as long as the host's own request timeout allows: 60 seconds in some hosts, longer or unlimited in hosts that reset their timeout while the server reports progress. `timeout_ms` only bounds the command; it never makes the call last longer. Do not start a job with `setsid`, `nohup` or `&` to get past the limit: `secret_exec` ends its children when it returns, and a job started outside it is not redacted. Routes, in order:
+
+1. A command that fits in one call: `secret_exec`.
+2. A longer job: run `qbit-vault exec --secret NAME -- <command>` as your host's background job (its shell tool, in the repository or one of its linked Git worktrees, which share the main clone's project). Pass no `--session`: without it only a project grant applies, and the output is redacted the same way. If it answers `grant_required` with the hint about `--session`, the secret has only a once or session grant (or is sensitive): call `secret_request` and ask for the project scope ("always in this project"), then run it again. A secret the user marked sensitive cannot run this way.
+
 ## Background jobs, scripts and subagents
 
 A background job, a script or a subagent command that uses a credential runs through `secret_exec`, so its output and the notification when it ends are redacted. A job that prints a stored value directly (a plain shell command, not `secret_exec`) makes the host drop its completion notice, and the user sees a block naming the secret.

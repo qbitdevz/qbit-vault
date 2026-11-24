@@ -18,7 +18,7 @@ Every request and response carries:
 | `op` | yes | One of `request`, `list`, `exec`, `manage`, `grant`, `revoke`, `capabilities` |
 | `v` | yes | Operation schema version, integer, currently `1` for all ops |
 | `session` | yes | Opaque host session id, `^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$` (prefix = host: `pi`, `claude`, `codex`, `cli`; the MCP server generates `mcp`) |
-| `cwd` | yes | Absolute path of the working directory; used to resolve the repository root for the project layer and the `project` scope |
+| `cwd` | yes | Absolute path of the working directory; used to resolve the repository root for the project layer and the `project` scope. A linked Git worktree resolves to the root of its main clone, when the worktree and the clone name each other |
 | `host` | no | `{ "name": "gentle-shell", "version": "3.7.0" }` for audit |
 
 Responses carry `ok: true` with the op's payload, or `ok: false` with a **refusal** (see below). No other error shape exists.

@@ -290,6 +290,16 @@ func grantCwdOf(dir string) (string, error) {
 	return foldPath(dir), nil
 }
 
+// searchedNote says which layers an exec looked in, in the terms `list` uses
+// for the project: its label, or that no project applies here. Human output
+// only (the label is a directory name).
+func searchedNote(dir string) string {
+	if l, err := vault.ProjectLayer(dir); err == nil {
+		return " (searched: project " + oneLine(l.Label) + ", global)"
+	}
+	return " (searched: global; no project applies here)"
+}
+
 // grantRefusal is grant_required, saying what the user must do when a grant
 // exists but does not apply here (issue #42). It names no path and no value.
 // With no session (exec without --session, issue #64) no once or session grant
@@ -351,6 +361,7 @@ func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
 	for _, name := range p.names {
 		e, err := findEntry(s, name, layerFlags{}, p.dir)
 		if err != nil {
+			g.searched = searchedNote(p.dir)
 			return err
 		}
 		recs = append(recs, e)

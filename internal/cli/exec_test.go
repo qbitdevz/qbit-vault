@@ -107,7 +107,11 @@ func (w *world) wantRefusalIs(rf refusal.Refusal, args ...string) {
 	before := len(w.auditEvents(audit.EventRefusal))
 	startedBefore := countStarted(w.auditEvents(audit.EventExec))
 	code, out, errs := w.run("", args...)
-	if code != 3 || out != "" || errs != "error: "+rf.Message+"\n" {
+	humanOK := errs == "error: "+rf.Message+"\n"
+	if typ == refusal.UnknownSecret { // exec adds the layers it searched (issue #64)
+		humanOK = strings.HasPrefix(errs, "error: "+rf.Message+" (searched: ") && strings.HasSuffix(errs, ")\n")
+	}
+	if code != 3 || out != "" || !humanOK {
 		w.t.Fatalf("human: code=%d stdout=%q stderr=%q, want a %s refusal", code, out, errs, typ)
 	}
 	code, out, errs = w.run("", append([]string{"--json"}, args...)...)
