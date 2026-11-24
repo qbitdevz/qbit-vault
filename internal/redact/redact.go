@@ -237,24 +237,49 @@ func (s *state) wipe() {
 	s.wiped = true
 }
 
-// scan redacts buf. Unless final, it stops at the first position where a
-// longer pattern could still complete beyond the end of buf, and reports how
-// many bytes were consumed; the caller keeps buf[consumed:] for the next
-// call. It appends the redacted output to out and returns the replacement
-// count.
+// minCut is the shortest trailing piece of a value that is still redacted when
+// the stream ends in the middle of it; a shorter overlap carries no useful
+// part of a value and would redact ordinary text.
+const minCut = 4
+
+// partial returns the pattern of which rest is a proper prefix, longest
+// pattern first, or -1.
+func (s *state) partial(rest []byte) int {
+	for _, pi := range s.first[rest[0]] {
+		if p := s.pats[pi].b; len(p) > len(rest) && bytes.HasPrefix(p, rest) {
+			return pi
+		}
+	}
+	return -1
+}
+
+// scan redacts buf. Unless final, it stops at the first position where buf
+// ends in a proper prefix of some pattern (a value that may still complete),
+// and reports how many bytes were consumed; the caller keeps buf[consumed:]
+// for the next call. Everything before that point is released at once. When
+// final, a trailing proper prefix of at least minCut bytes is replaced by
+// that pattern's marker: a cut value is a leak too. It appends the redacted
+// output to out and returns the replacement count.
 func (s *state) scan(buf []byte, final bool, out []byte) (res []byte, consumed, n int) {
 	i, run := 0, 0
 	for i < len(buf) {
-		if !final && i+s.maxLen > len(buf) {
+		pi := s.partial(buf[i:])
+		if pi >= 0 && !final {
 			break
 		}
-		cands := s.first[buf[i]]
 		hit := -1
-		for _, pi := range cands {
-			if bytes.HasPrefix(buf[i:], s.pats[pi].b) {
-				hit = pi
+		for _, ci := range s.first[buf[i]] {
+			if bytes.HasPrefix(buf[i:], s.pats[ci].b) {
+				hit = ci
 				break
 			}
+		}
+		if hit < 0 && pi >= 0 && len(buf)-i >= minCut {
+			out = append(out, buf[run:i]...)
+			out = append(out, s.toks[s.pats[pi].tok]...)
+			i, run = len(buf), len(buf)
+			n++
+			break
 		}
 		if hit < 0 {
 			i++

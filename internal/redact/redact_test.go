@@ -256,7 +256,8 @@ func TestAdjacentOccurrences(t *testing.T) {
 func TestSharedPrefixValues(t *testing.T) {
 	r := mustNew(t, sec("ONE", "TESTSECRET_shared_prefix_one"), sec("TWO", "TESTSECRET_shared_prefix_two"))
 	out, n := r.Bytes([]byte("TESTSECRET_shared_prefix_two TESTSECRET_shared_prefix_one TESTSECRET_shared_prefix_"))
-	if string(out) != "[REDACTED:TWO] [REDACTED:ONE] TESTSECRET_shared_prefix_" || n != 2 {
+	// The cut tail is a prefix of both values: redacted (F1), by the first.
+	if string(out) != "[REDACTED:TWO] [REDACTED:ONE] [REDACTED:ONE]" || n != 3 {
 		t.Fatalf("shared prefix: n=%d", n)
 	}
 }
@@ -349,10 +350,11 @@ func TestWriterCountAndClose(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if w.Count() != 1 {
+	if w.Count() != 2 {
 		t.Fatalf("count = %d", w.Count())
 	}
-	if got := dst.String(); got != "a "+token+" b "+fixture[:10] {
+	// The cut value at the end is redacted too (F1).
+	if got := dst.String(); got != "a "+token+" b "+token {
 		t.Fatalf("Close did not flush the remainder (len %d)", len(got))
 	}
 	if err := w.Close(); err != nil {
@@ -419,7 +421,7 @@ func TestDestinationErrorPropagates(t *testing.T) {
 func TestDestinationErrorOnClose(t *testing.T) {
 	r := mustNew(t, sec("API_KEY", fixture))
 	w := r.Writer(&failWriter{})
-	if _, err := w.Write([]byte("short")); err != nil {
+	if _, err := w.Write([]byte(fixture[:10])); err != nil {
 		t.Fatalf("held-back write must not touch the destination: %v", err)
 	}
 	if err := w.Close(); !errors.Is(err, errDst) {

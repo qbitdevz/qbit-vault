@@ -93,6 +93,10 @@ func childMain(mode string) {
 		touch(filepath.Join(dir, "ready2"))
 		waitForFile(filepath.Join(dir, "go2"))
 		os.Stderr.WriteString(b[len(b)/2:] + "\n")
+	case "cut-sleep": // all but the last byte of env var arg, then waits a minute
+		v := os.Getenv(arg)
+		os.Stdout.WriteString("p:" + v[:len(v)-1])
+		time.Sleep(time.Minute)
 	case "cat":
 		buf := make([]byte, 64)
 		n, _ := os.Stdin.Read(buf)

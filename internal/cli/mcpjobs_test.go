@@ -679,3 +679,37 @@ func TestMCPJobDropsTheVaultKeyOnceTheChildRuns(t *testing.T) {
 		t.Fatalf("the stored value is still in memory after the child started")
 	}
 }
+
+// F1: a value cut short when the job is stopped, times out or the exec times
+// out is redacted, not returned as a clear prefix.
+func TestMCPCutValueIsRedactedWhenAJobEnds(t *testing.T) {
+	w := jobWorld(t)
+	s := w.startMCP()
+	cmd := child(t, "cut-sleep", "A", 0)
+
+	job := s.startJob(10, cmd, nil)
+	time.Sleep(700 * time.Millisecond)
+	m, _ := s.call(11, "secret_exec_stop", map[string]any{"job": job})
+	if m["state"] != "stopped" || m["stdout"] != "p:[REDACTED:A]" || m["redactions"] != float64(1) {
+		t.Fatalf("stop = %v", m)
+	}
+
+	job = s.startJob(12, cmd, map[string]any{"timeout_ms": 1000})
+	m = s.jobStatus(13, job, 20000)
+	if m["state"] != "timed_out" || m["stdout"] != "p:[REDACTED:A]" {
+		t.Fatalf("timed out job = %v", m)
+	}
+	out, errs := s.finish()
+	noFixtures(t, "mcp output", out+errs)
+}
+
+func TestExecJSONTimeoutRedactsACutValue(t *testing.T) {
+	w := newExecWorld(t)
+	w.setSecret("A", xv, "--global")
+	w.grantTo(sessA, "A", "session")
+	_, out, errs := w.run("", "--json", "--session", sessA, "exec", "--secret", "A", "--timeout", "1s", "--", child(t, "cut-sleep", "A", 0))
+	noFixtures(t, "exec output", out+errs)
+	if !strings.Contains(out, `"partial":{"stdout":"p:[REDACTED:A]"`) {
+		t.Fatalf("out = %s", out)
+	}
+}
