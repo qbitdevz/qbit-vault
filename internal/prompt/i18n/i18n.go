@@ -34,8 +34,8 @@ const MaxTagLen = 35
 
 var catalogs = map[Locale]map[string]string{En: en, Es: es}
 
-// OSLocale reads the locale of the system's user (Windows: the default locale
-// name). It is a variable so a test never depends on the machine's language.
+// OSLocale reads the locale of the system's user (Windows: the first preferred
+// display language). It is a variable so a test never depends on the machine's language.
 var OSLocale = systemLocale
 
 // Match reports the language of tag, by its primary subtag and ignoring case:
