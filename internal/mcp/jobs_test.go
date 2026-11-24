@@ -753,3 +753,54 @@ func TestStartAnswersOnlyTheJobID(t *testing.T) {
 		t.Fatalf("start = %s", raw)
 	}
 }
+
+// F4: at most MaxFinishedJobs finished, unread jobs are kept; the oldest goes first.
+func TestOnlyTheNewestFinishedJobsAreKept(t *testing.T) {
+	s := &starter{}
+	n := MaxFinishedJobs + 3
+	for i := 0; i < n; i++ {
+		s.enqueue(steps(step{text: "r"}))
+	}
+	cs, jobs := connectJobs(t, s)
+	var ids []string
+	for i := 0; i < n; i++ {
+		ids = append(ids, start(t, cs))
+		time.Sleep(60 * time.Millisecond) // each ends before the next starts: the order is known
+	}
+	if got := jobs.Held(); got != MaxFinishedJobs {
+		t.Fatalf("%d jobs held, want %d", got, MaxFinishedJobs)
+	}
+	for i, id := range ids {
+		r := refusalOf(status(t, cs, id, 0))
+		if gone := i < n-MaxFinishedJobs; gone != (r != nil) || (gone && r["hint"] != refusal.HintUnknownJob) {
+			t.Fatalf("job %d: refusal %v", i, r)
+		}
+	}
+	// A running job is never dropped by the cap.
+	release := make(chan struct{})
+	s.enqueue(idle(release))
+	run := start(t, cs)
+	for i := 0; i < n; i++ {
+		s.enqueue(steps(step{text: "r"}))
+		start(t, cs)
+		time.Sleep(40 * time.Millisecond)
+	}
+	if m := status(t, cs, run, 0); m["state"] != "running" {
+		t.Fatalf("running job: %v", m)
+	}
+	close(release)
+}
+
+// N3: the capability row is reported only when the wrapped backend can start jobs.
+func TestInfoReportsJobsOnlyWhenTheBackendCanStartThem(t *testing.T) {
+	plain := NewJobs(&fake{})
+	t.Cleanup(plain.Shutdown)
+	if plain.Info().ExecJobs {
+		t.Fatal("a backend that cannot start jobs reports exec_jobs")
+	}
+	capable := NewJobs(&starter{})
+	t.Cleanup(capable.Shutdown)
+	if !capable.Info().ExecJobs {
+		t.Fatal("a backend that can start jobs does not report exec_jobs")
+	}
+}

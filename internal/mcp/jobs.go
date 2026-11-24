@@ -26,6 +26,11 @@ const (
 	jobOutputCap = runner.DefaultCaptureLimit
 	// stopWait bounds how long secret_exec_stop waits for the tree to end.
 	stopWait = 10 * time.Second
+	// MaxFinishedJobs is how many ended jobs whose result nobody has read are
+	// kept per server; when one more ends, the oldest is dropped and its id
+	// answers like any unknown id. It bounds the memory unread output holds
+	// (up to 1 MiB per stream per job).
+	MaxFinishedJobs = 8
 	// shutdownWait bounds how long Shutdown waits for the trees to end.
 	shutdownWait = 10 * time.Second
 )
@@ -58,7 +63,8 @@ type Jobs struct {
 
 	mu      sync.Mutex
 	jobs    map[string]*job
-	slots   int // jobs being started or running
+	slots   int    // jobs being started or running
+	done    []*job // ended jobs not yet reported, oldest first
 	closed  bool
 	watched map[*sdk.ServerSession]bool
 	base    context.Context
@@ -189,7 +195,7 @@ func (r *Jobs) Manage(ctx context.Context, e broker.Envelope, x broker.ManageReq
 // Info is the wrapped backend's, plus the job capability.
 func (r *Jobs) Info() broker.Info {
 	i := r.inner.Info()
-	i.ExecJobs = true
+	i.ExecJobs = r.starter != nil
 	return i
 }
 
@@ -331,6 +337,7 @@ func (r *Jobs) finish(j *job, out broker.ExecOutcome) {
 	discard := j.discard
 	j.mu.Unlock()
 
+	var evicted []*job
 	r.mu.Lock()
 	r.slots--
 	if !r.closed && !discard {
@@ -338,8 +345,16 @@ func (r *Jobs) finish(j *job, out broker.ExecOutcome) {
 		j.mu.Lock()
 		j.timer = t
 		j.mu.Unlock()
+		r.done = append(r.done, j)
+		for len(r.done) > MaxFinishedJobs {
+			evicted = append(evicted, r.done[0])
+			r.done = r.done[1:]
+		}
 	}
 	r.mu.Unlock()
+	for _, old := range evicted {
+		r.forget(old)
+	}
 	close(j.done)
 	if discard {
 		r.forget(j)
@@ -350,6 +365,12 @@ func (r *Jobs) finish(j *job, out broker.ExecOutcome) {
 func (r *Jobs) forget(j *job) {
 	r.mu.Lock()
 	delete(r.jobs, j.id)
+	for i, d := range r.done {
+		if d == j {
+			r.done = append(r.done[:i], r.done[i+1:]...)
+			break
+		}
+	}
 	r.mu.Unlock()
 	j.mu.Lock()
 	if j.timer != nil {

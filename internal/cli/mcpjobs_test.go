@@ -713,3 +713,18 @@ func TestExecJSONTimeoutRedactsACutValue(t *testing.T) {
 		t.Fatalf("out = %s", out)
 	}
 }
+
+// F2: the newest line of a running job is visible to the next status call,
+// without waiting for more output.
+func TestMCPRunningJobShowsItsNewestLine(t *testing.T) {
+	w := jobWorld(t)
+	s := w.startMCP()
+	job := s.startJob(10, child(t, "jobs-out", "4000", 0), nil)
+	time.Sleep(900 * time.Millisecond)
+	m := s.jobStatus(11, job, 0)
+	if m["state"] != "running" || m["stdout"] != "first\n" {
+		t.Fatalf("status = %v", m)
+	}
+	s.call(12, "secret_exec_stop", map[string]any{"job": job})
+	s.finish()
+}
