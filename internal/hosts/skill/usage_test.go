@@ -20,7 +20,7 @@ func TestSkillReadsTheLastUseAsAHint(t *testing.T) {
 		"`last_used_at`",
 		"`last_exit_code`",
 		"`last_ok_at`",
-		"An exit code of 0 is a hint, not proof",
+		"an exit code of 0 is a hint, not proof",
 		"never used successfully",
 		"before the user's memory",
 		"on this device",
