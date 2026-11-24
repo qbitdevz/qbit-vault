@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 const fxShown = "QVR1-TESTSECRET-SHOWN-KEY"
@@ -93,7 +95,7 @@ func TestPowerShellShowParses(t *testing.T) {
 		t.Skip("powershell.exe not found")
 	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "show.ps1"), powershellTool{}.build(ps, showDialog("T", "a 'b' $c\nline 2")).Stdin, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "show.ps1"), powershellTool{}.build(ps, showDialog(i18n.En, "T", "a 'b' $c\nline 2")).Stdin, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	drv := `$e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText((Join-Path $env:QBV_DIR 'show.ps1')), [ref]$null, [ref]$e); Write-Output $e.Count`
@@ -108,7 +110,7 @@ func TestPowerShellShowParses(t *testing.T) {
 // A recovery key must be selectable so the user can copy it instead of
 // typing it: on Windows the text sits in a read-only text box, not a label.
 func TestPowerShellShowTextIsSelectable(t *testing.T) {
-	s := string(powershellTool{}.build("powershell.exe", showDialog("Recovery key", "QVR1-TESTSECRET_x")).Stdin)
+	s := string(powershellTool{}.build("powershell.exe", showDialog(i18n.En, "Recovery key", "QVR1-TESTSECRET_x")).Stdin)
 	for _, want := range []string{"$sel.ReadOnly = $true", "$sel.Multiline = $true", "$sel.Text = $code.Replace("} {
 		if !strings.Contains(s, want) {
 			t.Errorf("script lacks %q", want)
@@ -146,7 +148,7 @@ func TestSplitShown(t *testing.T) {
 // whose height is measured, not counted in logical lines.
 func TestPowerShellShowLayout(t *testing.T) {
 	text := "Write this recovery key down.\n\n" + fxShown
-	s := string(powershellTool{}.build("powershell.exe", showDialog("Recovery key", text)).Stdin)
+	s := string(powershellTool{}.build("powershell.exe", showDialog(i18n.En, "Recovery key", text)).Stdin)
 	prelude := s[:strings.Index(s, psBodyMarker)]
 	if !strings.Contains(prelude, "$text = Dec "+psString("Write this recovery key down.")) {
 		t.Errorf("the label does not hold the explanation only:\n%s", prelude)
@@ -164,7 +166,7 @@ func TestPowerShellShowLayout(t *testing.T) {
 		t.Error("the box does not show $code")
 	}
 	// A single paragraph goes all in the box: the label is dropped.
-	one := string(powershellTool{}.build("powershell.exe", showDialog("Confirmation code", fxShown)).Stdin)
+	one := string(powershellTool{}.build("powershell.exe", showDialog(i18n.En, "Confirmation code", fxShown)).Stdin)
 	if !strings.Contains(one, "$text = Dec "+psString("")) || !strings.Contains(one, "$code = Dec "+psString(fxShown)) {
 		t.Error("one paragraph is not all in the box")
 	}

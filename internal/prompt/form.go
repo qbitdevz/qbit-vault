@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 	"github.com/qbitdevz/qbit-vault/internal/secret"
 )
 
@@ -35,7 +36,7 @@ type formField struct {
 
 // formDialog is one dialog for all of reqs: the request header once (names,
 // reason, who asks, layer) and one labelled box per field.
-func formDialog(reqs []SecretRequest) dialog {
+func formDialog(loc i18n.Locale, reqs []SecretRequest) dialog {
 	names := make([]string, len(reqs))
 	fields := make([]formField, len(reqs))
 	for i, r := range reqs {
@@ -47,27 +48,28 @@ func formDialog(reqs []SecretRequest) dialog {
 		if r.Description != "" {
 			label += " (" + r.Description + ")"
 		}
-		says := " (hidden)"
+		says := loc.T("field.hidden")
 		if r.Visible {
-			says = " (shown while you type)"
+			says = loc.T("field.shown")
 		}
 		fields[i] = formField{label: escape(label) + says, visible: r.Visible}
 	}
 	head := reqs[0]
 	head.Name, head.Label, head.Visible, head.Field, head.Fields, head.Description = strings.Join(names, ", "), "", false, 0, 0, ""
 	// No Value line: it would speak for every box, and each box says itself.
-	rows := headerRows(head, false)
-	input := "Fill in each field. The agent never sees what you enter:"
+	rows := headerRows(loc, head, false)
+	input := loc.T("input.form")
 	return dialog{
 		kind:        dialogForm,
 		title:       dialogTitle,
-		heading:     "Secret request",
+		heading:     loc.T("heading.request"),
 		rows:        rows,
 		tail:        input,
 		text:        rowsText(rows) + "\n" + input,
 		fields:      fields,
-		okLabel:     "Save",
-		cancelLabel: "Cancel",
+		okLabel:     loc.T("btn.save"),
+		cancelLabel: loc.T("btn.cancel"),
+		loc:         loc,
 	}
 }
 
@@ -85,7 +87,7 @@ func (n *native) Form(reqs []SecretRequest) ([]secret.Secret, error) {
 	if !ok || len(reqs) == 0 {
 		return nil, ErrNoForm
 	}
-	d := formDialog(reqs)
+	d := formDialog(n.loc, reqs)
 	r, st, err := n.askWith(ft.buildForm(n.path, d), d)
 	if err != nil {
 		return nil, err
@@ -158,7 +160,7 @@ func psFormScript(d dialog) string {
 		// Nothing to reveal: the fields are added as they always were.
 		b.WriteString(strings.Replace(psFormInputs, "AddInput $tb 480 $hides[$i]", "$tb.Width = 480; $p.Controls.Add($tb)", 1))
 	} else {
-		b.WriteString(psEye + psFormInputs)
+		b.WriteString(psEye(d.loc) + psFormInputs)
 	}
 	b.WriteString(psButtons)
 	b.WriteString("$first = $boxes[0]\n")

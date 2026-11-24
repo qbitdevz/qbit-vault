@@ -3,7 +3,10 @@ package prompt
 import (
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // powershellTool shows a WinForms dialog (L4). The script goes to
@@ -104,7 +107,7 @@ func psScript(d dialog) string {
 		if d.visible {
 			b.WriteString(psSecretInput + "$p.Controls.Add($tb)\n")
 		} else {
-			b.WriteString(psEye + psSecretInput + "AddInput $tb 520 $hide\n")
+			b.WriteString(psEye(d.loc) + psSecretInput + "AddInput $tb 520 $hide\n")
 		}
 		b.WriteString("$first = $tb\n")
 	case dialogChoose:
@@ -205,9 +208,9 @@ $tb.MaxLength = 70000
 // the AcceptButton, never takes the initial focus, starts off (masked), and
 // has an accessible name that follows its state. It only flips
 // UseSystemPasswordChar on the box: the value goes nowhere else. The labels
-// are fixed English text, kept here so they are easy to move.
-const psEye = `$eyes = @()
-function AddInput($box, $w, $masked) { if (-not $masked) { $box.Width = $w; $p.Controls.Add($box); return }; $c = New-Object System.Windows.Forms.CheckBox; $c.Appearance = 'Button'; $c.FlatStyle = 'Flat'; $c.FlatAppearance.BorderColor = Col '#16303D'; $c.FlatAppearance.CheckedBackColor = Col '#16303D'; $c.AutoSize = $false; $c.Size = New-Object System.Drawing.Size(60, 26); $c.TextAlign = 'MiddleCenter'; $c.Margin = New-Object System.Windows.Forms.Padding(0); $c.BackColor = Col '#07121B'; $c.ForeColor = Col '#C7D9DE'; $c.UseMnemonic = $false; $c.Text = 'Show'; $c.AccessibleName = 'Show value'; $c.Checked = $false; $c.Add_CheckedChanged({ $box.UseSystemPasswordChar = -not $this.Checked; if ($this.Checked) { $this.Text = 'Hide'; $this.AccessibleName = 'Hide value' } else { $this.Text = 'Show'; $this.AccessibleName = 'Show value' } }.GetNewClosure()); $box.Width = $w - 66; $m = $box.Margin; $box.Margin = New-Object System.Windows.Forms.Padding(0, 0, 6, 0); $row = New-Object System.Windows.Forms.FlowLayoutPanel; $row.FlowDirection = 'LeftToRight'; $row.WrapContents = $false; $row.AutoSize = $true; $row.Margin = $m; $row.Controls.Add($box); $row.Controls.Add($c); $p.Controls.Add($row); $global:eyes += $c }
+// come from the catalogue, as base64 data like every other text of the script.
+const psEyeCode = `$eyes = @()
+function AddInput($box, $w, $masked) { if (-not $masked) { $box.Width = $w; $p.Controls.Add($box); return }; $c = New-Object System.Windows.Forms.CheckBox; $c.Appearance = 'Button'; $c.FlatStyle = 'Flat'; $c.FlatAppearance.BorderColor = Col '#16303D'; $c.FlatAppearance.CheckedBackColor = Col '#16303D'; $c.AutoSize = $false; $c.Size = New-Object System.Drawing.Size(60, 26); $c.TextAlign = 'MiddleCenter'; $c.Margin = New-Object System.Windows.Forms.Padding(0); $c.BackColor = Col '#07121B'; $c.ForeColor = Col '#C7D9DE'; $c.UseMnemonic = $false; $c.Text = $tShow; $c.AccessibleName = $tShowValue; $c.Checked = $false; $c.Add_CheckedChanged({ $box.UseSystemPasswordChar = -not $this.Checked; if ($this.Checked) { $this.Text = $tHide; $this.AccessibleName = $tHideValue } else { $this.Text = $tShow; $this.AccessibleName = $tShowValue } }.GetNewClosure()); $box.Width = $w - 66; $m = $box.Margin; $box.Margin = New-Object System.Windows.Forms.Padding(0, 0, 6, 0); $row = New-Object System.Windows.Forms.FlowLayoutPanel; $row.FlowDirection = 'LeftToRight'; $row.WrapContents = $false; $row.AutoSize = $true; $row.Margin = $m; $row.Controls.Add($box); $row.Controls.Add($c); $p.Controls.Add($row); $global:eyes += $c }
 `
 
 // psShowText puts the code of a show dialog (a recovery key, a pairing code)
@@ -286,3 +289,23 @@ $out.Flush()
 
 const psChooseOutput = `for ($i = 0; $i -lt $radios.Count; $i++) { if ($radios[$i].Checked) { [System.Console]::Out.Write([string]($i + 1)) } }
 `
+
+// psEye is the toggle code with its four labels in loc, set as variables
+// first: base64 data decoded by the script, so a label of any language
+// travels as ASCII.
+func psEye(loc i18n.Locale) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "$tShow = Dec %s\n", psString(loc.T("eye.show")))
+	fmt.Fprintf(&b, "$tHide = Dec %s\n", psString(loc.T("eye.hide")))
+	fmt.Fprintf(&b, "$tShowValue = Dec %s\n", psString(loc.T("eye.show_value")))
+	fmt.Fprintf(&b, "$tHideValue = Dec %s\n", psString(loc.T("eye.hide_value")))
+	// The button is as wide as its longest label needs: the box gives up the
+	// same width, so the row keeps the width of the input it replaces.
+	w := 60
+	if n, err := strconv.Atoi(loc.T("eye.width")); err == nil && n >= 60 && n <= 120 {
+		w = n
+	}
+	code := strings.Replace(psEyeCode, "Size(60, 26)", fmt.Sprintf("Size(%d, 26)", w), 1)
+	code = strings.Replace(code, "$box.Width = $w - 66", fmt.Sprintf("$box.Width = $w - %d", w+6), 1)
+	return b.String() + code
+}

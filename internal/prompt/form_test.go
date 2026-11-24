@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 var formReqs = []SecretRequest{
@@ -19,21 +21,21 @@ var formReqs = []SecretRequest{
 }
 
 func TestFormDialog(t *testing.T) {
-	d := formDialog(formReqs)
+	d := formDialog(i18n.En, formReqs)
 	if d.kind != dialogForm || len(d.fields) != 2 || d.fields[0].label != "Host (shown while you type)" || !d.fields[0].visible || d.fields[1].visible {
 		t.Fatalf("dialog=%+v", d)
 	}
 	if !strings.Contains(d.text, "DB_HOST, DB_PASSWORD") || !strings.Contains(d.text, "run the shop-api migrations") {
 		t.Fatalf("text=%q", d.text)
 	}
-	unnamed := formDialog([]SecretRequest{{Name: "A\x1b[31m"}, {Name: "B"}})
+	unnamed := formDialog(i18n.En, []SecretRequest{{Name: "A\x1b[31m"}, {Name: "B"}})
 	if unnamed.fields[0].label != `A\x1b[31m (hidden)` {
 		t.Fatalf("label not escaped: %q", unnamed.fields[0].label)
 	}
 }
 
 func TestZenityForm(t *testing.T) {
-	d := formDialog(formReqs)
+	d := formDialog(i18n.En, formReqs)
 	got := zenityTool{}.buildForm("/usr/bin/zenity", d).Args
 	want := []string{"--forms", "--no-markup", "--width=480", "--title=QBit Vault", "--text=" + d.plain(), "--ok-label=Save", "--cancel-label=Cancel", "--separator=" + formSep, "--add-entry=Host (shown while you type)", "--add-password=Password (hidden)"}
 	if !reflect.DeepEqual(got, want) {
@@ -51,7 +53,7 @@ func TestZenityForm(t *testing.T) {
 }
 
 func TestPowerShellForm(t *testing.T) {
-	d := formDialog(formReqs)
+	d := formDialog(i18n.En, formReqs)
 	s := string(powershellTool{}.buildForm("powershell.exe", d).Stdin)
 	for _, must := range []string{"$labels = @(", "$hides = @($false, $true)", "UseSystemPasswordChar = $hides[$i]", "OpenStandardOutput", "TopMost = $true", "exit 2"} {
 		if !strings.Contains(s, must) {
@@ -117,7 +119,7 @@ func TestPowerShellFormParses(t *testing.T) {
 	dir := t.TempDir()
 	for i, tt := range hostile {
 		reqs := []SecretRequest{{Name: "A", Reason: tt.in, Label: tt.in, Visible: true}, {Name: "B", Label: tt.in}}
-		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%02d.ps1", i)), powershellTool{}.buildForm(ps, formDialog(reqs)).Stdin, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%02d.ps1", i)), powershellTool{}.buildForm(ps, formDialog(i18n.En, reqs)).Stdin, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -141,7 +143,7 @@ func TestPowerShellFormParses(t *testing.T) {
 
 // W2: zenity renders Pango markup unless told not to.
 func TestZenityFormHasNoMarkup(t *testing.T) {
-	if args := (zenityTool{}).buildForm("/usr/bin/zenity", formDialog(formReqs)).Args; args[1] != "--no-markup" {
+	if args := (zenityTool{}).buildForm("/usr/bin/zenity", formDialog(i18n.En, formReqs)).Args; args[1] != "--no-markup" {
 		t.Fatalf("args=%q", args)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 	"github.com/qbitdevz/qbit-vault/internal/secret"
 )
 
@@ -100,6 +101,11 @@ type SecretRequest struct {
 // PassphraseRequest says what a passphrase prompt protects, so the user does
 // not type the wrong secret.
 type PassphraseRequest struct {
+	// ID names one of qbit-vault's own passphrases ("vault", "export",
+	// "import"): its heading, label and second entry then come from the
+	// catalogue in the dialog's language, and the three fields below hold the
+	// English text of the same.
+	ID string
 	// Heading names the dialog (default Label).
 	Heading string
 	// Label is the question of the first entry.
@@ -117,11 +123,11 @@ type PassphraseRequest struct {
 // The passphrases qbit-vault asks for.
 var (
 	// VaultPassphrase unlocks or creates the vault key (passphrase mode).
-	VaultPassphrase = PassphraseRequest{Heading: "Vault passphrase", Label: "Vault passphrase", Again: "Type the passphrase again"}
+	VaultPassphrase = PassphraseRequest{ID: "vault", Heading: "Vault passphrase", Label: "Vault passphrase", Again: "Type the passphrase again"}
 	// ExportPassphrase protects an export file; ask it Twice.
-	ExportPassphrase = PassphraseRequest{Heading: "Export passphrase", Label: "Export passphrase (protects this backup file)", Again: "Type the export passphrase again"}
+	ExportPassphrase = PassphraseRequest{ID: "export", Heading: "Export passphrase", Label: "Export passphrase (protects this backup file)", Again: "Type the export passphrase again"}
 	// ImportPassphrase opens an export file.
-	ImportPassphrase = PassphraseRequest{Heading: "Export passphrase", Label: "Passphrase of the export file"}
+	ImportPassphrase = PassphraseRequest{ID: "import", Heading: "Export passphrase", Label: "Passphrase of the export file"}
 )
 
 // Twice is r asked twice.
@@ -130,20 +136,26 @@ func (r PassphraseRequest) Twice() PassphraseRequest {
 	return r
 }
 
-// again is the question of the second entry.
-func (r PassphraseRequest) again() string {
-	if r.Again != "" {
-		return r.Again
+// texts are the heading, the first question and the second question of r in
+// loc: qbit-vault's own passphrases come from the catalogue, any other text
+// is shown as given.
+func (r PassphraseRequest) texts(loc i18n.Locale) (heading, label, again string) {
+	switch r.ID {
+	case "vault":
+		return loc.T("pass.vault.heading"), loc.T("pass.vault.label"), loc.T("pass.vault.again")
+	case "export":
+		return loc.T("pass.export.heading"), loc.T("pass.export.label"), loc.T("pass.export.again")
+	case "import":
+		return loc.T("pass.import.heading"), loc.T("pass.import.label"), loc.T("pass.again")
 	}
-	return "Type the passphrase again"
-}
-
-// heading is the title line of a passphrase dialog.
-func (r PassphraseRequest) heading() string {
-	if r.Heading != "" {
-		return r.Heading
+	heading, label, again = r.Heading, r.Label, r.Again
+	if again == "" {
+		again = loc.T("pass.again")
 	}
-	return r.Label
+	if heading == "" {
+		heading = label
+	}
+	return heading, label, again
 }
 
 // Backend asks the user. Every method blocks until the user answers.
@@ -158,6 +170,24 @@ type Backend interface {
 	Confirm(q string) (bool, error)
 	// Passphrase reads a masked passphrase, twice when req.Confirm is set.
 	Passphrase(req PassphraseRequest) (secret.Secret, error)
+}
+
+// Localizer is a backend whose dialogs can be shown in another language than
+// English: the texts the backend adds around a question (buttons, headings,
+// labels) come from the catalogue in that language. The question itself is
+// already text in the caller's language.
+type Localizer interface {
+	// WithLocale returns the backend showing its own texts in loc.
+	WithLocale(loc i18n.Locale) Backend
+}
+
+// BindLocale shows b's dialogs in loc when b supports it. Any other backend is
+// returned as it is.
+func BindLocale(b Backend, loc i18n.Locale) Backend {
+	if l, ok := b.(Localizer); ok {
+		return l.WithLocale(loc)
+	}
+	return b
 }
 
 // Terminal is the seam under the tty backend: a console with an echoed line
@@ -255,12 +285,20 @@ type tty struct {
 	open    func() (Terminal, error)
 	timeout time.Duration
 	ctx     context.Context // ends every prompt with it; nil is never
+	loc     i18n.Locale     // the language of the texts the backend adds
 }
 
 // WithContext implements Contexter.
 func (b *tty) WithContext(ctx context.Context) Backend {
 	c := *b
 	c.ctx = ctx
+	return &c
+}
+
+// WithLocale implements Localizer.
+func (b *tty) WithLocale(loc i18n.Locale) Backend {
+	c := *b
+	c.loc = loc
 	return &c
 }
 
@@ -298,19 +336,19 @@ func readErr(err error) error {
 func (b *tty) Secret(req SecretRequest) (secret.Secret, error) {
 	var out secret.Secret
 	err := b.with(func(ctx context.Context, t Terminal) error {
-		label := "Value"
+		label := b.loc.T("tty.value")
 		if req.Heading != "" {
-			_, _ = io.WriteString(t, "QBit Vault: "+escape(req.Heading)+"\n  "+escape(req.Reason)+"\n")
-			label = "Answer"
+			_, _ = io.WriteString(t, dialogTitle+": "+escape(req.Heading)+"\n  "+escape(req.Reason)+"\n")
+			label = b.loc.T("tty.answer")
 		} else {
-			_, _ = io.WriteString(t, Header(req))
+			_, _ = io.WriteString(t, HeaderIn(b.loc, req))
 		}
 		read := t.ReadHidden
 		if req.Visible {
-			_, _ = io.WriteString(t, label+" (shown while you type): ")
+			_, _ = io.WriteString(t, b.loc.T("tty.shown", label))
 			read = t.ReadLine
 		} else {
-			_, _ = io.WriteString(t, label+" (hidden): ")
+			_, _ = io.WriteString(t, b.loc.T("tty.hidden", label))
 		}
 		raw, err := read(ctx)
 		if err != nil {
@@ -329,8 +367,9 @@ func (b *tty) Passphrase(req PassphraseRequest) (secret.Secret, error) {
 		if req.Reason != "" {
 			_, _ = io.WriteString(t, escape(req.Reason)+"\n")
 		}
+		_, label, again := req.texts(b.loc)
 		for try := 1; ; try++ {
-			_, _ = io.WriteString(t, req.Label+": ")
+			_, _ = io.WriteString(t, label+": ")
 			first, err := t.ReadHidden(ctx)
 			if err != nil {
 				return readErr(err)
@@ -340,7 +379,7 @@ func (b *tty) Passphrase(req PassphraseRequest) (secret.Secret, error) {
 				out = secret.New("passphrase", first)
 				return nil
 			}
-			_, _ = io.WriteString(t, req.again()+": ")
+			_, _ = io.WriteString(t, again+": ")
 			second, err := t.ReadHidden(ctx)
 			if err != nil {
 				return readErr(err)
@@ -350,7 +389,7 @@ func (b *tty) Passphrase(req PassphraseRequest) (secret.Secret, error) {
 				out = secret.New("passphrase", first)
 				return nil
 			}
-			_, _ = io.WriteString(t, mismatchText+"\n")
+			_, _ = io.WriteString(t, b.loc.T("pass.mismatch")+"\n")
 			if try == maxPassphraseTries {
 				return ErrMismatch
 			}
@@ -362,9 +401,6 @@ func (b *tty) Passphrase(req PassphraseRequest) (secret.Secret, error) {
 // maxPassphraseTries bounds how many times a new passphrase is asked twice
 // when the two entries differ; the last mismatch is ErrMismatch.
 const maxPassphraseTries = 3
-
-// mismatchText is what the user is told when the two entries differ.
-const mismatchText = "Passphrases do not match."
 
 // maxChoiceTries bounds how many invalid menu answers are tolerated.
 const maxChoiceTries = 5
@@ -382,7 +418,7 @@ func (b *tty) Choose(q string, options []string, def int) (int, error) {
 		}
 		_, _ = io.WriteString(t, m.String())
 		for range maxChoiceTries {
-			fmt.Fprintf(t, "Choice [%d]: ", def+1)
+			_, _ = io.WriteString(t, b.loc.T("tty.choice", def+1))
 			line, err := t.ReadLine(ctx)
 			if err != nil {
 				return readErr(err)
@@ -396,7 +432,7 @@ func (b *tty) Choose(q string, options []string, def int) (int, error) {
 				chosen = n - 1
 				return nil
 			}
-			fmt.Fprintf(t, "Type a number from 1 to %d, or press Enter for the default.\n", len(options))
+			_, _ = io.WriteString(t, b.loc.T("tty.choice_retry", len(options))+"\n")
 		}
 		return ErrCancelled
 	})
@@ -406,14 +442,16 @@ func (b *tty) Choose(q string, options []string, def int) (int, error) {
 func (b *tty) Confirm(q string) (bool, error) {
 	yes := false
 	err := b.with(func(ctx context.Context, t Terminal) error {
-		_, _ = io.WriteString(t, escapeLines(q)+" [y/N] ")
+		_, _ = io.WriteString(t, escapeLines(q)+b.loc.T("tty.yes_no"))
 		line, err := t.ReadLine(ctx)
 		if err != nil {
 			return readErr(err)
 		}
-		switch strings.ToLower(strings.TrimSpace(string(line))) {
-		case "y", "yes":
-			yes = true
+		answer := strings.ToLower(strings.TrimSpace(string(line)))
+		for _, w := range strings.Split(b.loc.T("tty.yes_words"), ",") {
+			if answer == w {
+				yes = true
+			}
 		}
 		return nil
 	})
@@ -426,40 +464,40 @@ type headerRow struct{ label, value string }
 // headerRows are the lines of a capture request, every text escaped. The
 // terminal prints them as text and the Windows dialog lays them out as a
 // grid. withValue adds whether the value is new or replaces the saved one.
-func headerRows(req SecretRequest, withValue bool) []headerRow {
-	saved := "all projects"
+func headerRows(loc i18n.Locale, req SecretRequest, withValue bool) []headerRow {
+	saved := loc.T("val.all_projects")
 	if req.Project != "" {
-		saved = "project " + escape(req.Project)
+		saved = loc.T("val.project", escape(req.Project))
 	}
 	rows := []headerRow{
-		{"Who", Requester(req.Host, req.Session)},
-		{"Secret", escape(req.Name)},
-		{"Why", escape(req.Reason)},
-		{"Saved in", saved},
+		{loc.T("row.who"), RequesterIn(loc, req.Host, req.Session)},
+		{loc.T("row.secret"), escape(req.Name)},
+		{loc.T("row.why"), escape(req.Reason)},
+		{loc.T("row.saved_in"), saved},
 	}
 	if req.Description != "" {
-		rows = append(rows, headerRow{"About", escape(req.Description)})
+		rows = append(rows, headerRow{loc.T("row.about"), escape(req.Description)})
 	}
 	if len(req.Stored) > 0 {
 		names := make([]string, len(req.Stored))
 		for i, n := range req.Stored {
 			names[i] = escape(n)
 		}
-		rows = append(rows, headerRow{"Already saved", strings.Join(names, ", ") + " (not asked again)"})
+		rows = append(rows, headerRow{loc.T("row.already_saved"), loc.T("val.not_asked", strings.Join(names, ", "))})
 	}
 	if req.Fields > 1 {
 		label := req.Label
 		if label == "" {
 			label = req.Name
 		}
-		rows = append(rows, headerRow{"Field", fmt.Sprintf("%d of %d (%s)", req.Field, req.Fields, escape(label))})
+		rows = append(rows, headerRow{loc.T("row.field"), loc.T("val.field_of", req.Field, req.Fields, escape(label))})
 	}
 	if withValue {
-		value := "new"
+		value := loc.T("val.new")
 		if req.Existing {
-			value = "replaces the saved value"
+			value = loc.T("val.replaces")
 		}
-		rows = append(rows, headerRow{"Value", value})
+		rows = append(rows, headerRow{loc.T("row.value"), value})
 	}
 	return rows
 }
@@ -469,8 +507,8 @@ func rowsText(rows []headerRow) string {
 	var b strings.Builder
 	for _, r := range rows {
 		l := r.label + ":"
-		if len(l) < 10 {
-			l += strings.Repeat(" ", 10-len(l))
+		if n := utf8.RuneCountInString(l); n < 10 {
+			l += strings.Repeat(" ", 10-n)
 		} else {
 			l += " "
 		}
@@ -483,17 +521,25 @@ func rowsText(rows []headerRow) string {
 // words: who asks, the secret, why, where it is saved and whether the value
 // is new. Every piece of text is escaped, so a reason cannot paint over the
 // terminal or add a line of its own (R4).
-func Header(req SecretRequest) string {
-	return "QBit Vault: secret request\n" + rowsText(headerRows(req, true))
+func Header(req SecretRequest) string { return HeaderIn(i18n.En, req) }
+
+// HeaderIn is Header in loc.
+func HeaderIn(loc i18n.Locale, req SecretRequest) string {
+	return loc.T("tty.request_title") + "\n" + rowsText(headerRows(loc, req, true))
 }
 
 // Requester names who is asking, for a person: the agent by its product name
-// and the first characters of the session, enough to match the audit log.
-func Requester(host, session string) string {
+// and the first characters of the session, enough to match the audit log. It
+// is English: the audit log records it.
+func Requester(host, session string) string { return RequesterIn(i18n.En, host, session) }
+
+// RequesterIn is Requester in loc. Product names (Claude Code, Codex, Pi) and
+// the host and session text are the same in every language.
+func RequesterIn(loc i18n.Locale, host, session string) string {
 	var who string
 	switch host {
 	case "":
-		who = "an agent"
+		who = loc.T("who.agent")
 	case "claude", "claude-code":
 		who = "Claude Code"
 	case "codex":
@@ -501,9 +547,9 @@ func Requester(host, session string) string {
 	case "pi":
 		who = "Pi"
 	case "mcp":
-		who = "your agent"
+		who = loc.T("who.your_agent")
 	case "cli":
-		return "you (qbit-vault)"
+		return loc.T("who.cli")
 	default:
 		who = escape(host)
 	}
@@ -517,7 +563,7 @@ func Requester(host, session string) string {
 	if r := []rune(id); len(r) > 8 {
 		id = string(r[:8])
 	}
-	return who + " (session " + escape(id) + ")"
+	return loc.T("who.session", who, escape(id))
 }
 
 // Escape makes s safe to put in a question or dialog text: control

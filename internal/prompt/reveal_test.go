@@ -3,6 +3,8 @@ package prompt
 import (
 	"strings"
 	"testing"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // S4 and S5 (odd/tasks/issues-61-65-dialogs.md): the PowerShell dialog can be
@@ -11,12 +13,12 @@ import (
 
 func psScripts() map[string]string {
 	return map[string]string{
-		"secret":     psScript(secretDialog(req)),
-		"passphrase": psScript(passphraseDialog(PassphraseRequest{Label: "Passphrase"}, false)),
-		"choose":     psScript(chooseDialog("q", []string{"a", "b"}, 0)),
-		"confirm":    psScript(confirmDialog("q")),
-		"show":       psScript(showDialog("t", "intro\n\ncode")),
-		"form":       psFormScript(formDialog(formReqs)),
+		"secret":     psScript(secretDialog(i18n.En, req)),
+		"passphrase": psScript(passphraseDialog(i18n.En, PassphraseRequest{Label: "Passphrase"}, false)),
+		"choose":     psScript(chooseDialog(i18n.En, "q", []string{"a", "b"}, 0)),
+		"confirm":    psScript(confirmDialog(i18n.En, "q")),
+		"show":       psScript(showDialog(i18n.En, "t", "intro\n\ncode")),
+		"form":       psFormScript(formDialog(i18n.En, formReqs)),
 	}
 }
 
@@ -42,7 +44,7 @@ func TestEveryPowerShellDialogCanBeMinimized(t *testing.T) {
 func TestRevealToggleForMaskedSecretInput(t *testing.T) {
 	for _, name := range []string{"secret", "passphrase"} {
 		s := psScripts()[name]
-		for _, must := range []string{"$hide = $true\n", "AddInput $tb 520 $hide", "System.Windows.Forms.CheckBox", "AccessibleName = 'Show value'", "UseSystemPasswordChar = -not $this.Checked", "$c.Checked = $false"} {
+		for _, must := range []string{"$hide = $true\n", "AddInput $tb 520 $hide", "System.Windows.Forms.CheckBox", "AccessibleName = $tShowValue", "$tShowValue = Dec " + psString("Show value"), "$tHide = Dec " + psString("Hide"), "UseSystemPasswordChar = -not $this.Checked", "$c.Checked = $false"} {
 			if !strings.Contains(s, must) {
 				t.Errorf("%s: script lacks %q", name, must)
 			}
@@ -51,7 +53,7 @@ func TestRevealToggleForMaskedSecretInput(t *testing.T) {
 }
 
 func TestNoRevealToggleForVisibleInput(t *testing.T) {
-	s := psScript(secretDialog(textReq))
+	s := psScript(secretDialog(i18n.En, textReq))
 	for _, bad := range []string{"CheckBox", "AddInput", "AccessibleName", "$eyes"} {
 		if strings.Contains(s, bad) {
 			t.Errorf("visible field has toggle code %q", bad)
@@ -69,8 +71,8 @@ func TestNoRevealToggleForVisibleInput(t *testing.T) {
 }
 
 func TestRevealToggleInForm(t *testing.T) {
-	s := psFormScript(formDialog(formReqs))
-	for _, must := range []string{"$hides = @($false, $true)", "AddInput $tb 480 $hides[$i]", "System.Windows.Forms.CheckBox", "AccessibleName = 'Show value'", "UseSystemPasswordChar = -not $this.Checked"} {
+	s := psFormScript(formDialog(i18n.En, formReqs))
+	for _, must := range []string{"$hides = @($false, $true)", "AddInput $tb 480 $hides[$i]", "System.Windows.Forms.CheckBox", "AccessibleName = $tShowValue", "$tShowValue = Dec " + psString("Show value"), "$tHide = Dec " + psString("Hide"), "UseSystemPasswordChar = -not $this.Checked"} {
 		if !strings.Contains(s, must) {
 			t.Errorf("form script lacks %q", must)
 		}
@@ -79,7 +81,7 @@ func TestRevealToggleInForm(t *testing.T) {
 	if !strings.Contains(s, "if (-not $masked) {") {
 		t.Error("AddInput has no plain branch for visible fields")
 	}
-	allVisible := psFormScript(formDialog([]SecretRequest{formReqs[0], formReqs[0]}))
+	allVisible := psFormScript(formDialog(i18n.En, []SecretRequest{formReqs[0], formReqs[0]}))
 	if strings.Contains(allVisible, "CheckBox") {
 		t.Error("a form of visible fields has a toggle")
 	}
@@ -125,9 +127,7 @@ func TestRevealToggleLeavesTheValuePathAndExitCodesAlone(t *testing.T) {
 		t.Error("form output path changed")
 	}
 	// Nothing in the toggle code writes anything out.
-	eye := psEye[:strings.Index(psEye, "\n")+1]
-	_ = eye
-	if strings.Contains(psEye, "Console") || strings.Contains(psEye, "Write(") || strings.Contains(psEye, "Out-File") {
+	if strings.Contains(psEye(i18n.En), "Console") || strings.Contains(psEye(i18n.En), "Write(") || strings.Contains(psEye(i18n.En), "Out-File") {
 		t.Error("toggle code writes output")
 	}
 }
