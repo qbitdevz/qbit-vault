@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/qbitdevz/qbit-vault/internal/audit"
 	"github.com/qbitdevz/qbit-vault/internal/exitcode"
+	"github.com/qbitdevz/qbit-vault/internal/runner"
 	"github.com/qbitdevz/qbit-vault/internal/vault"
 )
 
@@ -459,5 +461,37 @@ func TestCheckLeakBattery(t *testing.T) {
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// THREAT_MODEL R23: what a check discloses is already available to a caller
+// with the same grants inside exec, so the dump guard lets the comparison and
+// the length through and the answers agree with check's.
+func TestCheckDisclosesNothingExecCouldNot(t *testing.T) {
+	if !runner.PosixShellAvailable() {
+		t.Skip("no POSIX shell")
+	}
+	w := checkWorld(t)
+	w.put("SAME_A", chkPlain, "session")
+	w.put("SAME_B", chkPlain, "session")
+	w.put("OTHER_C", "TESTSECRET_check_other_value", "session")
+	run := func(cmd string) map[string]any {
+		t.Helper()
+		_, m, _ := w.broker("exec", envelope("exec", w.outside, `"command":`+jsonString(cmd)+`,"shell":"sh","secrets":[{"name":"SAME_A"},{"name":"SAME_B"},{"name":"OTHER_C"}]`))
+		if m["ok"] != true {
+			t.Fatalf("%q: %v", cmd, m)
+		}
+		return m
+	}
+	if m := run(`[ "$SAME_A" = "$SAME_B" ]`); m["exit_code"] != float64(0) {
+		t.Errorf("equal pair: %v", m)
+	}
+	if m := run(`[ "$SAME_A" = "$OTHER_C" ]`); m["exit_code"] == float64(0) {
+		t.Errorf("different pair: %v", m)
+	}
+	m := run(`printf %s ${#SAME_A}`)
+	_, c, _ := w.check(w.outside, "SAME_A")
+	if m["stdout"] != strconv.Itoa(int(resultsOf(t, c)["SAME_A"]["length"].(float64))) {
+		t.Errorf("exec length %v, check length %v", m["stdout"], c["results"])
 	}
 }
