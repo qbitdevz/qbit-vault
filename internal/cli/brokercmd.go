@@ -197,6 +197,9 @@ func (b *cliBackend) List(ctx context.Context, e broker.Envelope) (broker.ListRe
 			CreatedAt: en.Record.CreatedAt, UpdatedAt: en.Record.UpdatedAt,
 		}
 		meta.Grant, meta.GrantNote = listedGrant(st, en, e.Session, listCwd, now)
+		if until, ok := en.Record.PreviousUntil(); ok {
+			meta.PreviousUntil = until.UTC().Format(time.RFC3339)
+		}
 		res.Secrets = append(res.Secrets, meta)
 	}
 	return res, nil

@@ -90,6 +90,8 @@ Response:
 
 `grant` is the grant `exec` would accept for this secret from `cwd` and this session (the same check, run without spending a `once` grant): `null` when none applies. A grant that exists but does not apply here is never shown as active. In that case the optional `grant_note` says why and what to do: `a project grant exists for another directory; call secret_request` (a project grant of a global secret covers only the repository it was approved in) or `the grant is for an earlier value of this secret; call secret_request` (the value was replaced). The field is absent when there is nothing to say; clients that do not know it ignore it (added in 1.1.0, additive, issue #42).
 
+`previous_until` is present only while the secret has a previous value the user can restore (§ Previous value): an RFC 3339 time, the end of the 7 days that started when the value was replaced. It is a time, never the value, nor its length; absent when there is none, and clients that do not know it ignore it (additive, issue #62).
+
 Returns the secrets that resolve from `cwd`: every secret of the current project layer, plus every global secret not overridden by it. `project` is `null` outside a repository. Other projects' secrets are never listed. Never values. `unlinked_match` is `{ "label": "shop-api" }` when sync brought a project layer from another device whose origin URL matches this repository but the user has not linked it here (`REMOTE_SYNC.md` § 7.5): the agent may suggest that the user run `qbit-vault link shop-api`; it cannot link it itself. Otherwise `null`.
 
 `policy` tells the agent everything it may and may not do. Its strings are normative (hosts ship them verbatim) and the same text is the MCP server's `instructions`:
@@ -194,7 +196,7 @@ Request:
 
 | Field | Req | Rules |
 | --- | --- | --- |
-| `action` | yes | `remove` \| `edit` \| `move` \| `replace` |
+| `action` | yes | `remove` \| `edit` \| `move` \| `replace` \| `revert` |
 | `name` | yes | Secret name; must exist in `layer` for `cwd`, else `unknown_secret` |
 | `layer` | yes | `global` \| `project` (the project of `cwd`) |
 | `reason` | yes | Same rules as `request.reason` |
@@ -206,6 +208,8 @@ Request:
 - `edit`: metadata only, never the value. Clearing `sensitive` or emptying `binaries` widens access, so the prompt marks it as **widening**.
 - `move`: keeps value and metadata, drops the record's grants (R-LAYER-05).
 - `replace`: one decision, then the masked capture for the new value. The decision offers `Replace, allow once` (preselected) and, where the record allows it, `Replace, always in this project` (never a session answer), then `Replace, but ask me before each use` and `Don't replace` (a decline). The old grants are dropped; the picked scope, if any, becomes a new prompt-token grant on the new value for this envelope's session, so the agent's next `exec` needs no second permission dialog.
+
+- `revert`: restores the previous value (§ Previous value). It carries no `to` and no `changes`. The user confirms outside the chat in one yes/no dialog that names the secret and when the previous value was replaced, never a value or a length. The current value becomes the previous one (so a revert can be undone), the record gets a new id and its grants are dropped exactly as in a `replace`, and no value is shown or returned. With no recoverable previous value it is refused before any dialog (`internal`, `NAME has no previous value to restore`, with the hint below).
 
 Except for the grant the user picks in a `replace` decision, `manage` never creates a grant. Declines start the same per-name cooldown as `request`.
 
@@ -294,7 +298,7 @@ Response:
   "layers": ["global","project"],
   "prompt_backends": ["pi-ui","osascript","powershell","zenity","kdialog","tty"],
   "field_kinds": ["secret","text"], "max_fields": 8,
-  "keychain": "secret-service", "streaming": true, "sync": false, "refusal_hints": 1, "dialog_locale": 1, "secret_check": 1 }
+  "keychain": "secret-service", "streaming": true, "sync": false, "refusal_hints": 1, "dialog_locale": 1, "secret_check": 1, "value_revert": 1 }
 ```
 
 `refusal_hints: 1` is a capability row (additive, same major): the broker puts a `hint` on every refusal (and a `rule` on `dump_command`), see § Refusals. A host that does not find the row must not depend on those fields. The `capabilities` version string is unchanged.
@@ -303,7 +307,13 @@ Response:
 
 `secret_check: 1` is a capability row (additive, same major, issue #62): the `check` op above exists. A host that does not find the row must not call it (an older broker answers `invalid request: op`). The `capabilities` version string stays `1.1`.
 
+`value_revert: 1` is a capability row (additive, same major, issue #62): `manage` accepts the action `revert` and `list` may carry `previous_until` (§ Previous value). A host that does not find the row must not send `revert` (an older broker answers `invalid request: action`). The `capabilities` version string stays `1.1`.
+
 `dialog_locale: 1` is a capability row (additive, same major, issue #63): `request`, `list`, `exec`, `manage` and `check` accept the optional `locale` field below. A host that does not find the row must not send it (an older broker refuses an unknown field). The `capabilities` version string stays `1.1`.
+
+## Previous value
+
+Replacing a stored value (`manage` `replace`, a `request` capture over an existing name, `qbit-vault set` over one, an import over one) keeps the value it replaced, once, with the record, for **7 days** (issue #62; where and how it is stored: `STORAGE.md` § Previous value). The model never sees it. It learns only that one is recoverable (`previous_until` in `list`) and may **propose** `manage` `revert`; the user confirms in a dialog, or runs `qbit-vault revert NAME` themselves. A revert swaps the two values and restarts the 7 days for the one it set aside; it gives the record a new id and drops its grants like a replace, so a permission never carries over to a different value. A second replace discards the older previous value, removing the secret removes it, and after 7 days it is gone for every reader. `secret_check` describes only the current value and is not extended. `exec` injects and redacts only current values; the hooks' guards also redact a recoverable previous value.
 
 ## Dialog language
 
@@ -368,7 +378,7 @@ Hints by type (`dump_command` takes its hint from its `rule`, below):
 | `contract_mismatch` | Update qbit-vault; the user runs 'qbit-vault sync' and restarts the agent. |
 | `internal` | Report it; the user can run 'qbit-vault doctor'. |
 
-Nine cases replace the hint of their type with another fixed text:
+Ten cases replace the hint of their type with another fixed text:
 
 - `grant_required` when a grant exists but does not apply here (another directory, or an earlier value): `A grant exists but does not apply here; call secret_request to ask the user for a new one.`
 - `vault_locked` when `exec` or `list` could show no unlock dialog (the `message` is the 1.4.0 text that names `qbit-vault unlock`): `No unlock dialog could be shown; ask the user to run 'qbit-vault unlock' in their terminal, then retry.`
@@ -378,6 +388,7 @@ Nine cases replace the hint of their type with another fixed text:
 - `scope_not_allowed` for a project grant outside a repository: `Run it inside a repository, or ask for another scope.`
 - `grant_required` from the command line `qbit-vault exec` run without `--session`, when no project grant applies (the `message` is `<NAME> has no project grant; a once or session grant needs --session <host>:<id>`): `Without --session only a project grant applies; a once or session grant needs --session <host>:<id>, the id of the session it was granted to. Ask the user for a project grant, or pass --session.` The broker always has a session, so an MCP or broker call never gets this one.
 - `internal` for `exec_start` with four jobs already running (`too many running jobs`, retryable): `Four jobs are already running; wait for one to end with secret_exec_status, or stop one with secret_exec_stop, then start again.`
+- `internal` for a `manage` `revert` of a secret with no recoverable previous value (`NAME has no previous value to restore`): `There is no previous value to restore: the secret was never replaced, the replaced value is older than 7 days, or it was removed. Ask the user for the right value with secret_manage replace.`
 - `internal` for `exec_status` or `exec_stop` of a job that does not exist for this session (`no such job`): `That job does not exist here: it was never started by this server, its final state was already reported, it was stopped, or its result expired. Start a new one with secret_exec_start.`
 
 For `dump_command` the `message` is `the command is refused while secrets are injected: <phrase>`:
@@ -403,7 +414,7 @@ These descriptions are shipped verbatim to every host so models see the same con
 
 **`secret_list`** — "List the secrets available from this directory (global ones and this project's), and the rules for what you can and cannot do with them. Values are never returned. Call this first when you need a credential."
 
-**`secret_manage`** — "Propose a change to a secret: remove it, edit its metadata, move it between global and this project, or replace its value. The user confirms or declines outside the chat; nothing changes without that. You never see values and you cannot grant access. Give a concrete reason."
+**`secret_manage`** — "Propose a change to a secret: remove it, edit its metadata, move it between global and this project, replace its value, or revert it to the previous value (only while secret_list shows previous_until for it). The user confirms or declines outside the chat; nothing changes without that. You never see values and you cannot grant access. Give a concrete reason."
 
 **`secret_exec_start`** — "Start a shell command in the background with named secrets injected as environment variables for that process only, and return a job id as soon as it has started. Use this instead of secret_exec for anything that may take more than about 30 seconds (builds, test suites, deploys, migrations): a host may cancel a tool call that runs longer than its request timeout, 60 seconds in some, and that ends the command. It takes the same input as secret_exec and is refused for the same reasons with the same hints; a once grant is spent when the job starts. Then call secret_exec_status with the job id and wait_ms to read the redacted output and the exit code. At most 4 jobs run at once, and every job ends when this server stops."
 

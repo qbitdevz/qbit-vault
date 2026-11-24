@@ -85,6 +85,7 @@ const (
 	HintNeedsRepository  = "Run it inside a repository, or ask for another scope."
 	HintJobsBusy         = "Four jobs are already running; wait for one to end with secret_exec_status, or stop one with secret_exec_stop, then start again."
 	HintUnknownJob       = "That job does not exist here: it was never started by this server, its final state was already reported, it was stopped, or its result expired. Start a new one with secret_exec_start."
+	HintNoPreviousValue  = "There is no previous value to restore: the secret was never replaced, the replaced value is older than 7 days, or it was removed. Ask the user for the right value with secret_manage replace."
 	HintNeedsSession     = "Without --session only a project grant applies; a once or session grant needs --session <host>:<id>, the id of the session it was granted to. Ask the user for a project grant, or pass --session."
 )
 

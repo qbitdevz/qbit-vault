@@ -253,7 +253,7 @@ func TestHintsMatchContract(t *testing.T) {
 			t.Errorf("CONTRACT.md has no hint row for %s with %q", ty, h)
 		}
 	}
-	for _, h := range []string{HintGrantNotApplying, HintNoUnlockDialog, HintBusy, HintBadRequest, HintCancelled, HintNeedsRepository, HintNeedsSession, HintJobsBusy, HintUnknownJob} {
+	for _, h := range []string{HintGrantNotApplying, HintNoUnlockDialog, HintBusy, HintBadRequest, HintCancelled, HintNeedsRepository, HintNeedsSession, HintJobsBusy, HintUnknownJob, HintNoPreviousValue} {
 		if !strings.Contains(doc, "`"+h+"`") {
 			t.Errorf("CONTRACT.md does not list the hint %q", h)
 		}

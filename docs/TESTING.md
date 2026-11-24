@@ -115,3 +115,7 @@ A host adapter is conformant when, against the JSON schema in `contracts/secrets
 - `vault`: `FuzzEnvelope` — corrupted envelopes never decrypt to anything, never panic.
 - `remote`: `FuzzOpen` — mutated remote vault objects, key envelopes and anchors are always refused, never panic, never partially applied.
 - `merge`: `FuzzMerge` — random bases and edit sequences on two sides; invariants: deterministic, no record lost, tombstones respected.
+
+## Previous value (issue #62)
+
+`internal/vault/previous_test.go` (storage: one level, same-value replace, expiry at the boundary, no restamp on expiry, revert swap and undo, backup/restore/rekey round trips, the v1.4.1 decoder shape), `internal/merge` (a conflicting replace keeps the winner's previous value), `internal/cli/previous_test.go` (list, describe and `revert`; `secret_manage revert`: dialog text in English and Spanish, nothing-to-revert before any dialog, decline and cooldown, grants not carried over; hooks redact it; no value in any agent answer, dialog, audit line or file of the home, raw or encoded) and `internal/hosts/skill/previous_test.go`. The old-binary check is a manual one: build v1.4.1 with `git archive v1.4.1` in the OS temp directory and run it, built with `-tags e2eprompt`, against a vault, a backup and an export written by the new binary in an isolated `QBIT_VAULT_HOME` (passphrase mode, `init --agents none`): it must open, list, restore the backup, import the export and save.

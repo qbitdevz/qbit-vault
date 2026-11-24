@@ -132,6 +132,10 @@ type SecretMeta struct {
 	// (it does not apply from this directory, or belongs to an earlier value).
 	// Optional and additive: absent when there is nothing to say.
 	GrantNote string `json:"grant_note,omitempty"`
+	// PreviousUntil is when the value this secret replaced stops being
+	// recoverable by a revert (RFC 3339). Optional and additive: present only
+	// while a previous value exists. It is a time, never the value.
+	PreviousUntil string `json:"previous_until,omitempty"`
 }
 
 // Notes for SecretMeta.GrantNote. Fixed text: no path, no value.

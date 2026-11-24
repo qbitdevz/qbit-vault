@@ -190,6 +190,8 @@ func mapErr(err error, name string) error {
 		return nil
 	case errors.Is(err, vault.ErrInvalidName):
 		return refusal.New(refusal.InvalidName, "")
+	case errors.Is(err, vault.ErrNoPrevious):
+		return noPreviousValue(name)
 	case errors.Is(err, vault.ErrNotFound):
 		return refusal.New(refusal.UnknownSecret, name)
 	case errors.Is(err, vault.ErrNoProject):

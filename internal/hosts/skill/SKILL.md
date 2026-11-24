@@ -20,7 +20,7 @@ qbit-vault is the user's local secrets broker. You can run commands that need a 
 2. Missing a name, or need permission for one: `secret_request` with every name the task needs in one call (up to 8 fields) and a concrete reason ("run `gh release create` for v1.2", not "needed"), written in the conversation language together with `locale` (see Dialog language). The user types new values or approves existing ones in a dialog outside the chat. You get references and a grant, never the value.
 3. Run the command with `secret_exec`: the command plus `secrets: [{name}]`; each secret becomes an environment variable of that one process. Reference it the way the shell expects (`$GITHUB_TOKEN`, `%GITHUB_TOKEN%`, `$env:GITHUB_TOKEN`).
 4. Read the redacted output. `[REDACTED:NAME]` in it is expected; never try to recover what is behind it.
-5. To change a secret (remove it, edit its metadata, move it between global and this project, or replace its value) use `secret_manage` with a concrete reason; the user confirms outside the chat. A replace also lets the user set the new value's permission in the same dialog, so retry `secret_exec` right after it.
+5. To change a secret (remove it, edit its metadata, move it between global and this project, replace its value, or revert it to the previous one) use `secret_manage` with a concrete reason; the user confirms outside the chat. A replace also lets the user set the new value's permission in the same dialog, so retry `secret_exec` right after it.
 
 ## Dialog language
 
@@ -36,7 +36,8 @@ An `exec` that runs but gets `401`, `403`, "invalid token" or "authentication fa
 2. Tell the user in plain words what the check shows, for example "LOGIN_EMAIL does not look like an email and holds the same value as LOGIN_PASSWORD", or "API_TOKEN ends with a newline". When it shows nothing wrong, say that too: the value may be well formed and still not be the credential the service wants.
 3. Tell the user what the service expects, as precisely as you can: the credential type (for Cloudflare an API Token, not the Global API Key), the scopes or permissions, the account or zone.
 4. Only then, and only for the secret the evidence points to, propose **one** `secret_manage` replace with that evidence in the reason. Do not propose a replace for a secret the check shows nothing wrong with unless the user says it is the wrong one. qbit-vault points out pasted quotes or invisible characters before saving, which is a common cause, and asks the user before saving a value that equals the one it replaces or another secret's: a decline answers `user_declined`, which ends the attempt (do not ask again, and you are never told which secret matched); always call `secret_check` before you propose a `secret_manage` replace after a rejection.
-5. If the new value is rejected too, stop and report what the service answered; do not ask again.
+5. If the new value is rejected too, check whether the replace was the mistake. When `secret_list` shows `previous_until` for that secret, the value it replaced is still recoverable until then: propose `secret_manage` with the action `revert` and a reason that says what the service answered, instead of asking the user to remember the old value. The user confirms in a dialog outside the chat; qbit-vault never shows you either value, and a revert swaps the two, so it can be undone, and ends the permissions given for that secret (ask for a grant again with `secret_request`). Without `previous_until` there is nothing to restore (it was never replaced, the replaced value is older than 7 days, or the secret was removed): say so and ask the user for the right value.
+6. If that is rejected too, stop and report what the service answered; do not ask again.
 
 ## Long commands
 

@@ -133,7 +133,27 @@ func (g *globals) buildHookRedactor(withText bool) (*redact.Redactor, error) {
 		return nil, mapErr(err, "")
 	}
 
+	// A recoverable previous value is as much a stored value as a current one:
+	// the agent could read it from a file or a log just the same.
+	previous, err := s.v.PreviousValues()
+	if err != nil {
+		return nil, mapErr(err, "")
+	}
+	defer func() {
+		for _, p := range previous {
+			p.Value.Wipe()
+		}
+	}()
+
 	var values []secret.Secret
+	for _, p := range previous {
+		if !withText && p.Kind == "text" {
+			continue
+		}
+		if p.Value.Len() >= redact.ShortLen || granted[[2]string{p.Name, p.Layer.Key()}] {
+			values = append(values, p.Value)
+		}
+	}
 	for _, e := range all {
 		if !withText && e.Record.Kind == "text" {
 			continue

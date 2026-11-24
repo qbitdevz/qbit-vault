@@ -45,6 +45,9 @@ const (
 	DialogLocale = 1
 	// SecretCheck is the capability row for the `check` op (CONTRACT.md § check).
 	SecretCheck = 1
+	// ValueRevert is the capability row for the `revert` action of manage and
+	// the optional `previous_until` of list (CONTRACT.md § Previous value).
+	ValueRevert = 1
 	// MaxRequestBytes bounds one request.
 	MaxRequestBytes = 64 << 10
 
@@ -95,7 +98,7 @@ var (
 	scopes    = []string{"once", "session", "project"}
 	layers    = []string{"global", "project"}
 	shells    = []string{"auto", "sh", "bash", "cmd", "pwsh"}
-	actions   = []string{"remove", "edit", "move", "replace"}
+	actions   = []string{"remove", "edit", "move", "replace", "revert"}
 )
 
 // invalid is the refusal for a request that fails validation (L3).
@@ -326,6 +329,7 @@ func capabilities(info Info) any {
 		RefusalHints   int      `json:"refusal_hints"`
 		DialogLocale   int      `json:"dialog_locale"`
 		SecretCheck    int      `json:"secret_check"`
+		ValueRevert    int      `json:"value_revert"`
 		ExecJobs       int      `json:"exec_jobs,omitempty"`
 	}
 	pb := info.PromptBackends
@@ -333,7 +337,7 @@ func capabilities(info Info) any {
 		pb = []string{}
 	}
 	c := caps{OK: true, Contract: Contract, Capabilities: Capabilities, Ops: ops, Layers: layers,
-		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints, DialogLocale: DialogLocale, SecretCheck: SecretCheck}
+		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints, DialogLocale: DialogLocale, SecretCheck: SecretCheck, ValueRevert: ValueRevert}
 	if info.ExecJobs {
 		c.ExecJobs = ExecJobs
 	}

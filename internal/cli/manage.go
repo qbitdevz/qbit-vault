@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/qbitdevz/qbit-vault/internal/audit"
 	"github.com/qbitdevz/qbit-vault/internal/broker"
@@ -106,6 +107,15 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 	if r.Action == "edit" {
 		diff = applyChanges(loc, &rec, r.Changes)
 	}
+	if r.Action == "revert" {
+		// Nothing to restore is answered before any dialog. diff carries the
+		// time the previous value was replaced, for the question only.
+		until, ok := en.Record.PreviousUntil()
+		if !ok {
+			return broker.ManageResponse{}, noPreviousValue(r.Name)
+		}
+		diff = replacedOnText(until)
+	}
 
 	ask, err := g.backend()
 	if err != nil {
@@ -169,6 +179,9 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 	case "move":
 		_, err = s.v.MoveWithGrants(r.Name, en.Layer, to, true, ed)
 		after = ptr(layerName(to))
+	case "revert":
+		_, err = s.v.RevertWithGrants(en.Layer, r.Name, ed)
+		after = ptr(layerName(en.Layer))
 	case "replace":
 		sec, aerr := ask.Secret(prompt.SecretRequest{Name: r.Name, Reason: r.Reason, Host: hostOf(e.Session),
 			Session: e.Session, Project: layerRequest(en.Layer), Existing: true})
@@ -217,6 +230,9 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 		_, err = s.v.ReplaceWithGrants(en.Layer, r.Name, rec, ed)
 		after = ptr(layerName(en.Layer))
 	}
+	if errors.Is(err, vault.ErrNoPrevious) {
+		return broker.ManageResponse{}, noPreviousValue(r.Name) // it expired while the dialog was open
+	}
 	if err != nil {
 		return broker.ManageResponse{}, asRefusal(mapErr(err, r.Name))
 	}
@@ -232,6 +248,18 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 }
 
 func ptr(s string) *string { return &s }
+
+// noPreviousValue is the refusal of a revert with nothing to restore: the name
+// and fixed text only, never a value or a time.
+func noPreviousValue(name string) refusal.Refusal {
+	return refusal.New(refusal.Internal, "").WithMessage(name + " has no previous value to restore").WithHint(refusal.HintNoPreviousValue)
+}
+
+// replacedOnText is when a previous value was replaced, given the end of its
+// window, as the dialogs and the terminal show it.
+func replacedOnText(until time.Time) string {
+	return until.Add(-vault.PreviousRetention).UTC().Format("2006-01-02 15:04 UTC")
+}
 
 // grantReplaced creates the grant the user picked together with a replace,
 // on the new record, through the same prompt-token path as request.
@@ -304,6 +332,8 @@ func manageQuestion(loc i18n.Locale, who string, r broker.ManageRequest, from, t
 		what = loc.T("what.edit", r.Name, whereText(loc, from), prompt.Escape(diff))
 	case "replace":
 		what = loc.T("what.replace", r.Name, whereText(loc, from))
+	case "revert":
+		what = loc.T("what.revert", r.Name, whereText(loc, from), diff) // diff: when the previous value was replaced
 	default:
 		what = loc.T("what.remove", r.Name, whereText(loc, from))
 	}

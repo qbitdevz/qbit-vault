@@ -30,7 +30,7 @@ import (
 var ToolDescriptions = map[string]string{
 	"secret_request":     "Ask the user for permission to use one or several named secrets (e.g. GITHUB_TOKEN, or DB_HOST, DB_USER and DB_PASSWORD together) in later commands. Ask for everything one task needs in a single call: up to 8 fields, each 'secret' (masked) or 'text' (visible, for non-secret values such as a hostname). The user will type or approve them outside the chat. You NEVER receive the values; you receive references and a grant. Give a concrete reason (what command, what for). Do not request secrets you do not need for the current task. If the user declines, do not ask again.",
 	"secret_list":        "List the secrets available from this directory (global ones and this project's), and the rules for what you can and cannot do with them. Values are never returned. Call this first when you need a credential.",
-	"secret_manage":      "Propose a change to a secret: remove it, edit its metadata, move it between global and this project, or replace its value. The user confirms or declines outside the chat; nothing changes without that. You never see values and you cannot grant access. Give a concrete reason.",
+	"secret_manage":      "Propose a change to a secret: remove it, edit its metadata, move it between global and this project, replace its value, or revert it to the previous value (only while secret_list shows previous_until for it). The user confirms or declines outside the chat; nothing changes without that. You never see values and you cannot grant access. Give a concrete reason.",
 	"secret_check":       "Describe the values of named secrets you could use right now, without seeing them: for each, its length, whether it is empty, padded with white space, multi-line or a placeholder such as change-me, what its shape looks like (email, url, jwt, pem, uuid, hex, base64, number or text), and which of the other names in the same call hold the identical value. Call it when a service rejects a credential, with every secret the failed call used, before you propose to replace one. It returns no value and no part of one. A name without a usable grant is refused as in secret_exec, and a once grant is not spent by a check.",
 	"secret_exec_start":  "Start a shell command in the background with named secrets injected as environment variables for that process only, and return a job id as soon as it has started. Use this instead of secret_exec for anything that may take more than about 30 seconds (builds, test suites, deploys, migrations): a host may cancel a tool call that runs longer than its request timeout, 60 seconds in some, and that ends the command. It takes the same input as secret_exec and is refused for the same reasons with the same hints; a once grant is spent when the job starts. Then call secret_exec_status with the job id and wait_ms to read the redacted output and the exit code. At most 4 jobs run at once, and every job ends when this server stops.",
 	"secret_exec_status": "Read a job started with secret_exec_start. Waits up to wait_ms (0 to 50000, default 0) and returns early when the job ends, so pass a wait_ms such as 30000 instead of polling in a loop. Returns state (running, exited, timed_out or stopped), exit_code once it ended, duration_ms, and the redacted stdout and stderr the job produced since your previous call for this job: each output is returned once, so keep what you need. A call that returns a finished state is the last one for that job; an unread result is kept for 10 minutes. Secret values are redacted as in secret_exec.",
@@ -105,7 +105,7 @@ type stopIn struct {
 }
 
 type manageIn struct {
-	Action  string                `json:"action" jsonschema:"remove, edit, move or replace"`
+	Action  string                `json:"action" jsonschema:"remove, edit, move, replace or revert"`
 	Name    string                `json:"name" jsonschema:"the secret name"`
 	Layer   string                `json:"layer" jsonschema:"global or project (the project of this directory)"`
 	Reason  string                `json:"reason" jsonschema:"why, shown to the user verbatim"`
@@ -185,7 +185,7 @@ func add(srv *sdk.Server, b broker.Backend, o Options, tool, op string) {
 		sdk.AddTool(srv, t, handler[stopIn](b, o, op))
 	case "manage":
 		t.InputSchema = inputSchema[manageIn](func(p map[string]*jsonschema.Schema) {
-			p["action"].Enum = []any{"remove", "edit", "move", "replace"}
+			p["action"].Enum = []any{"remove", "edit", "move", "replace", "revert"}
 		})
 		sdk.AddTool(srv, t, handler[manageIn](b, o, op))
 	}

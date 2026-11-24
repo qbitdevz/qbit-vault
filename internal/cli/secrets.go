@@ -83,6 +83,9 @@ type describeBody struct {
 	CreatedAt       string          `json:"created_at"`
 	UpdatedAt       string          `json:"updated_at"`
 	Grants          []describeGrant `json:"grants"`
+	// PreviousUntil is when the value this one replaced stops being
+	// recoverable (qbit-vault revert); absent when there is none.
+	PreviousUntil string `json:"previous_until,omitempty"`
 }
 
 type listEntry struct {
@@ -99,6 +102,8 @@ type listEntry struct {
 	// Unlinked marks a layer synced from another device that has no root
 	// on this one (qbit-vault link binds it).
 	Unlinked bool `json:"unlinked,omitempty"`
+	// PreviousUntil: see describeBody.
+	PreviousUntil string `json:"previous_until,omitempty"`
 }
 
 type listBody struct {
@@ -614,7 +619,7 @@ func newDescribe(g *globals) *cobra.Command {
 					OK: true, Name: name, Layer: layerName(e.Layer), Project: projectOf(e.Layer),
 					OverridesGlobal: e.OverridesGlobal, Description: r.Description, Sensitive: r.Sensitive,
 					Binaries: nonNil(r.Binaries), Hosts: nonNil(r.Hosts), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
-					Grants: shown,
+					Grants: shown, PreviousUntil: previousUntilText(r),
 				})
 			}
 			var b strings.Builder
@@ -636,6 +641,9 @@ func newDescribe(g *globals) *cobra.Command {
 					texts[i] = grantText(gr)
 				}
 				fmt.Fprintf(&b, "  grants:      %s\n", strings.Join(texts, "; "))
+			}
+			if until := previousUntilText(r); until != "" {
+				fmt.Fprintf(&b, "  previous:    recoverable until %s (qbit-vault revert %s)\n", until, name)
 			}
 			_, err = io.WriteString(cmd.OutOrStdout(), b.String())
 			return err
@@ -769,6 +777,7 @@ func newList(g *globals) *cobra.Command {
 						le.ProjectLabel = e.Layer.Label
 					}
 					le.Unlinked = e.Unlinked
+					le.PreviousUntil = previousUntilText(e.Record)
 					body.Secrets = append(body.Secrets, le)
 				}
 				return writeJSON(out, body)
@@ -809,6 +818,9 @@ func listTable(es []vault.Entry) string {
 		if e.Unlinked {
 			desc = strings.TrimSpace(desc + " (not linked on this device)")
 		}
+		if until := previousUntilText(e.Record); until != "" {
+			desc = strings.TrimSpace(desc + " (previous value until " + until + ")")
+		}
 		rows = append(rows, [3]string{e.Name, oneLine(layer), desc})
 	}
 	var w [2]int
@@ -822,6 +834,14 @@ func listTable(es []vault.Entry) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// previousUntilText is the end of the revert window as RFC 3339 UTC, or "".
+func previousUntilText(r vault.Record) string {
+	if until, ok := r.PreviousUntil(); ok {
+		return until.UTC().Format(time.RFC3339)
+	}
+	return ""
 }
 
 // oneLine keeps stored text on one line so it cannot forge extra output rows.
