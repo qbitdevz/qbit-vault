@@ -281,3 +281,25 @@ func TestSkillExplainsEveryDumpCommandRuleAndTheHint(t *testing.T) {
 		t.Error("skill still has the generic dump_command row")
 	}
 }
+
+// Issue #63: the agent sends the conversation language with every call that
+// can open a dialog, and writes its reason in the same language; it never
+// writes dialog text, and identifiers stay as they are.
+func TestSkillAsksForTheConversationLanguage(t *testing.T) {
+	s := string(skill.Content)
+	for _, want := range []string{
+		"## Dialog language",
+		"Always send `locale`",
+		"`secret_request`, `secret_list`, `secret_exec` and `secret_manage`",
+		"BCP 47",
+		"`es-ES`",
+		"write the `reason` in that same language",
+		"never translated",
+		"Secret names",
+		"qbit-vault writes every dialog itself",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
+		}
+	}
+}

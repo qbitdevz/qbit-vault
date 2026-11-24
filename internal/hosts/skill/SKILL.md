@@ -17,10 +17,16 @@ qbit-vault is the user's local secrets broker. You can run commands that need a 
 ## How to use it
 
 1. `secret_list` first. It returns the names visible from this directory (global ones and this project's), their metadata and the rules you must follow. It never returns values. A secret's `grant` is what `secret_exec` will accept from this directory; `null` means it will refuse. When `grant_note` is present a grant exists but does not apply here (another directory, or an earlier value): call `secret_request`.
-2. Missing a name, or need permission for one: `secret_request` with every name the task needs in one call (up to 8 fields) and a concrete reason ("run `gh release create` for v1.2", not "needed"). The user types new values or approves existing ones in a dialog outside the chat. You get references and a grant, never the value.
+2. Missing a name, or need permission for one: `secret_request` with every name the task needs in one call (up to 8 fields) and a concrete reason ("run `gh release create` for v1.2", not "needed"), written in the conversation language together with `locale` (see Dialog language). The user types new values or approves existing ones in a dialog outside the chat. You get references and a grant, never the value.
 3. Run the command with `secret_exec`: the command plus `secrets: [{name}]`; each secret becomes an environment variable of that one process. Reference it the way the shell expects (`$GITHUB_TOKEN`, `%GITHUB_TOKEN%`, `$env:GITHUB_TOKEN`).
 4. Read the redacted output. `[REDACTED:NAME]` in it is expected; never try to recover what is behind it.
 5. To change a secret (remove it, edit its metadata, move it between global and this project, or replace its value) use `secret_manage` with a concrete reason; the user confirms outside the chat. A replace also lets the user set the new value's permission in the same dialog, so retry `secret_exec` right after it.
+
+## Dialog language
+
+The user answers qbit-vault's dialogs in their own language. Always send `locale` with every `secret_request`, `secret_list`, `secret_exec` and `secret_manage` call: the BCP 47 tag of the language you are speaking with the user in (`es-ES`, `en-GB`; a plain `es` or `en` is fine). qbit-vault writes every dialog itself, in English or Spanish, from its own texts: you choose only the language and never supply dialog text. Also write the `reason` in that same language, because the user reads it word for word in the dialog and it is never translated.
+
+Secret names, scopes (`once`, `session`, `project`), layers (`global`, `project`), host names and paths stay exactly as they are in every language, so what the user approves is what you and the audit log name. A `locale` qbit-vault does not know is ignored, never an error: send your best tag.
 
 ## When a service rejects the credential
 
