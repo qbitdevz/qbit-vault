@@ -82,7 +82,7 @@ Agent harnesses can already block the *reading* of credential files through deny
 
 ### 5.1a Layers
 
-- R-LAYER-01. Every secret belongs to exactly one layer: `global`, or `project` bound to one repository root (resolved with `git rev-parse --show-toplevel`, else the nearest ancestor containing `.git`).
+- R-LAYER-01. Every secret belongs to exactly one layer: `global`, or `project` bound to one repository root (resolved with `git rev-parse --show-toplevel`, else the nearest ancestor containing `.git`; a linked worktree resolves to the root of its main clone, STORAGE.md § Layers).
 - R-LAYER-02. The same name MAY exist in the global layer and in any number of project layers. Resolution for a `cwd` is: the project layer of the repository containing `cwd`, else the global layer, else `unknown_secret`.
 - R-LAYER-03. Project layers MUST be stored inside `vault.enc` in `$QBIT_VAULT_HOME`, never inside the repository, so they cannot be committed.
 - R-LAYER-04. `request` and `set` outside a repository MUST only offer the global layer. Asking for the project layer there is refused with `no_project`.

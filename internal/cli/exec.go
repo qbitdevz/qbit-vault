@@ -113,8 +113,10 @@ $` + envSession + ` or a generated mcp:<16 hex>, and the Pi extension passes pi:
 A shell the host starts does not receive it. 'qbit-vault grants --json' shows
 the session of every once and session grant that is live.
 
-The secrets are looked up from the repository of the working directory, or
-from --cwd when given; the command runs there.`,
+The secrets are looked up from the project of the working directory, or of
+--cwd when given, and the command runs there. A linked Git worktree has the
+project of its main clone. --cwd selects both the directory the command runs
+in and the project that applies.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			plan, err := g.planExec(cmd, args, f)
