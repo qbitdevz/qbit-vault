@@ -19,6 +19,7 @@ Actionable refusals (issue #60, `odd/tasks/actionable-refusals.md`). The securit
 ### Fixed
 
 - The MCP tool inputs advertise the limits the broker enforces (issue #61): `secret_exec` lists 1 to 16 names and is never `null`, `command` is 1 to 16384 characters, `timeout_ms` is 1000 to 3600000 and `shell` is one of `auto`, `sh`, `bash`, `cmd`, `pwsh`; `secret_request` takes 1 to 8 `fields`; `secret_manage` lists its four actions. A call outside them is answered at the tool boundary with an error naming the field and the limit. A test keeps the tool schemas equal to the wire schema. The broker's own refusals are unchanged.
+- `secret_list` and `secret_exec` send `notifications/progress` while they wait, like `secret_request` and `secret_manage` already did, when the client gave a progress token (issue #65). A locked vault that asks its passphrase no longer lets a client that resets its timeout on progress give up at 60 s. Their texts are `Waiting for the vault to be unlocked.` and `Waiting for the vault to be unlocked or for the command to finish.`.
 
 ## [1.4.1] - 2026-11-12
 

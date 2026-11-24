@@ -162,12 +162,24 @@ func handler[In any](b broker.Backend, o Options, op string) sdk.ToolHandlerFor[
 	}
 }
 
+// progressText is what a waiting call reports, by op. request and manage
+// only ever wait for a dialog. list and exec wait for the unlock dialog of a
+// locked vault (issue #65), and exec for its command as well, so their text
+// does not claim that a dialog is open.
+var progressText = map[string]string{
+	"request": "Waiting for the user to answer the dialog.",
+	"manage":  "Waiting for the user to answer the dialog.",
+	"list":    "Waiting for the vault to be unlocked.",
+	"exec":    "Waiting for the vault to be unlocked or for the command to finish.",
+}
+
 // keepAlive sends a progress notification every ProgressInterval while a
-// request or manage call waits for a dialog, if the client sent a progress
-// token; the returned stop ends it and waits for it. Without a token it does
-// nothing. The notification carries a fixed text, never a name or a value.
+// call is open, if the client sent a progress token; the returned stop ends
+// it and waits for it. Without a token it does nothing. The notification
+// carries a fixed text, never a name or a value.
 func keepAlive(ctx context.Context, req *sdk.CallToolRequest, op string) (stop func()) {
-	if (op != "request" && op != "manage") || req == nil || req.Session == nil || req.Params == nil {
+	text := progressText[op]
+	if text == "" || req == nil || req.Session == nil || req.Params == nil {
 		return func() {}
 	}
 	token := req.Params.GetProgressToken()
@@ -187,7 +199,7 @@ func keepAlive(ctx context.Context, req *sdk.CallToolRequest, op string) (stop f
 				return
 			case <-tick.C:
 				_ = req.Session.NotifyProgress(ctx, &sdk.ProgressNotificationParams{
-					ProgressToken: token, Progress: n, Message: "Waiting for the user to answer the dialog."})
+					ProgressToken: token, Progress: n, Message: text})
 			}
 		}
 	}()
