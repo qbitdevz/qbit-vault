@@ -34,10 +34,12 @@ const (
 	// MaxRequestBytes bounds one request.
 	MaxRequestBytes = 64 << 10
 
-	maxCommandBytes = 16 << 10
-	maxExecSecrets  = 16
-	minTimeoutMS    = 1000
-	maxTimeoutMS    = 3600000
+	// MaxCommandBytes, MaxExecSecrets, MinTimeoutMS and MaxTimeoutMS are the
+	// `exec` limits of the wire schema; the MCP tool schema repeats them.
+	MaxCommandBytes = 16 << 10
+	MaxExecSecrets  = 16
+	MinTimeoutMS    = 1000
+	MaxTimeoutMS    = 3600000
 	defTimeoutMS    = 600000
 	minTTLMS        = 60000
 	maxTTLMS        = 86400000
@@ -269,11 +271,11 @@ func capabilities(info Info) any {
 
 func execRequest(m fields) (ExecRequest, error) {
 	r := ExecRequest{TimeoutMS: defTimeoutMS, Shell: "auto"}
-	if str(m, "command", &r.Command) != nil || strings.TrimSpace(r.Command) == "" || len(r.Command) > maxCommandBytes {
+	if str(m, "command", &r.Command) != nil || strings.TrimSpace(r.Command) == "" || len(r.Command) > MaxCommandBytes {
 		return r, invalid("command")
 	}
 	raw, ok := m["secrets"]
-	if !ok || strict(raw, &r.Secrets) != nil || len(r.Secrets) == 0 || len(r.Secrets) > maxExecSecrets {
+	if !ok || strict(raw, &r.Secrets) != nil || len(r.Secrets) == 0 || len(r.Secrets) > MaxExecSecrets {
 		return r, invalid("secrets")
 	}
 	seen := map[string]bool{}
@@ -290,7 +292,7 @@ func execRequest(m fields) (ExecRequest, error) {
 		seen[s.Name] = true
 	}
 	if _, ok := m["timeout_ms"]; ok {
-		if num(m, "timeout_ms", &r.TimeoutMS) != nil || r.TimeoutMS < minTimeoutMS || r.TimeoutMS > maxTimeoutMS {
+		if num(m, "timeout_ms", &r.TimeoutMS) != nil || r.TimeoutMS < MinTimeoutMS || r.TimeoutMS > MaxTimeoutMS {
 			return r, invalid("timeout_ms")
 		}
 	}

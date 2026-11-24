@@ -16,6 +16,10 @@ Actionable refusals (issue #60, `odd/tasks/actionable-refusals.md`). The securit
 
 - The `dump_command` message carries the rule phrase: `the command is refused while secrets are injected: <phrase>` (for example `it lists or reads the environment`).
 
+### Fixed
+
+- The MCP tool inputs advertise the limits the broker enforces (issue #61): `secret_exec` lists 1 to 16 names and is never `null`, `command` is 1 to 16384 characters, `timeout_ms` is 1000 to 3600000 and `shell` is one of `auto`, `sh`, `bash`, `cmd`, `pwsh`; `secret_request` takes 1 to 8 `fields`; `secret_manage` lists its four actions. A call outside them is answered at the tool boundary with an error naming the field and the limit. A test keeps the tool schemas equal to the wire schema. The broker's own refusals are unchanged.
+
 ## [1.4.1] - 2026-11-12
 
 Polish after 1.4.0 (`odd/tasks/polish-1.4.1.md`). Fixes only; no new feature. The Pi extension is `qbit-vault-pi` 0.2.3 (`pi-v0.2.3`).

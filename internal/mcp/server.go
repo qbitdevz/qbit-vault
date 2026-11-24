@@ -17,6 +17,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/qbitdevz/qbit-vault/internal/broker"
@@ -99,14 +100,43 @@ func add(srv *sdk.Server, b broker.Backend, o Options, tool, op string) {
 	t := &sdk.Tool{Name: tool, Description: ToolDescriptions[tool]}
 	switch op {
 	case "request":
+		t.InputSchema = inputSchema[requestIn](func(p map[string]*jsonschema.Schema) {
+			p["fields"].MinItems, p["fields"].MaxItems = jsonschema.Ptr(1), jsonschema.Ptr(broker.MaxFields)
+		})
 		sdk.AddTool(srv, t, handler[requestIn](b, o, op))
 	case "list":
 		sdk.AddTool(srv, t, handler[listIn](b, o, op))
 	case "exec":
+		t.InputSchema = inputSchema[execIn](func(p map[string]*jsonschema.Schema) {
+			// Required, so never null: the broker refuses null and [].
+			p["secrets"].Types, p["secrets"].Type = nil, "array"
+			p["secrets"].MinItems, p["secrets"].MaxItems = jsonschema.Ptr(1), jsonschema.Ptr(broker.MaxExecSecrets)
+			p["command"].MinLength, p["command"].MaxLength = jsonschema.Ptr(1), jsonschema.Ptr(broker.MaxCommandBytes)
+			p["timeout_ms"].Minimum, p["timeout_ms"].Maximum = jsonschema.Ptr(float64(broker.MinTimeoutMS)), jsonschema.Ptr(float64(broker.MaxTimeoutMS))
+			p["shell"].Enum = []any{"auto", "sh", "bash", "cmd", "pwsh"}
+		})
 		sdk.AddTool(srv, t, handler[execIn](b, o, op))
 	case "manage":
+		t.InputSchema = inputSchema[manageIn](func(p map[string]*jsonschema.Schema) {
+			p["action"].Enum = []any{"remove", "edit", "move", "replace"}
+		})
 		sdk.AddTool(srv, t, handler[manageIn](b, o, op))
 	}
+}
+
+// inputSchema is the schema the SDK infers for In with the structural limits
+// of the wire contract added by bound (issue #61): inference alone leaves a
+// list nullable and of any length. Only limits the broker answers with the
+// generic invalid-request refusal are added here, so names and reasons still
+// reach the broker and get their typed refusals (invalid_name,
+// reason_too_vague). A test keeps these equal to the wire schema.
+func inputSchema[In any](bound func(props map[string]*jsonschema.Schema)) *jsonschema.Schema {
+	s, err := jsonschema.For[In](nil)
+	if err != nil {
+		panic("mcp: tool input schema: " + err.Error())
+	}
+	bound(s.Properties)
+	return s
 }
 
 // handler turns the tool input into an envelope for op and answers with the
