@@ -245,7 +245,7 @@ func isLink(path string) bool {
 // vaultFiles and vaultDirs are what a vault home holds; locks and the temp
 // files of atomic writes are matched by shape.
 var (
-	vaultFiles = map[string]bool{"vault.enc": true, "state.json": true, "grants.enc": true, "audit.jsonl": true,
+	vaultFiles = map[string]bool{"vault.enc": true, "state.json": true, "grants.enc": true, "usage.enc": true, "audit.jsonl": true,
 		"audit.head": true, "key.enc": true, "config.yaml": true, "bindings.yaml": true, "dumpguard.yaml": true}
 	vaultDirs = map[string]bool{"backups": true, "keys": true, "remote": true}
 )

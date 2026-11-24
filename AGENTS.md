@@ -29,7 +29,7 @@ qbit-vault/                     (module github.com/qbitdevz/qbit-vault)
 │                               internal/dumpguard, kept equal by a test), secret-patterns.yaml
 ├── internal/
 │   ├── vault/                  encrypted store, layers, envelope users, atomic writes, backups,
-│   │                           schema 2 body, restore, rekey, sync state files
+│   │                           schema 2 body, restore, rekey, sync state files, the local usage file
 │   ├── envelope/               AEAD envelope shared by vault.enc, grants.enc and remote files
 │   ├── keychain/               OS keychain or passphrase-wrapped key (key.enc), unlock cache
 │   ├── perm/                   owner-only permissions (POSIX modes, Windows DACL)

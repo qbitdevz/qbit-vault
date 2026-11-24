@@ -189,6 +189,7 @@ func (b *cliBackend) List(ctx context.Context, e broker.Envelope) (broker.ListRe
 	for _, c := range grants.Cooldowns(st, e.Session, now) {
 		res.Cooldowns = append(res.Cooldowns, broker.Cooldown{Name: c.Name, Until: c.Until.UTC().Format(time.RFC3339)})
 	}
+	usage, _ := s.v.Usage() // an unreadable file is empty history (doctor reports it)
 	for _, en := range entries {
 		meta := broker.SecretMeta{
 			Name: en.Name, Layer: layerName(en.Layer), OverridesGlobal: en.OverridesGlobal, Kind: kindOf(en.Record),
@@ -197,6 +198,9 @@ func (b *cliBackend) List(ctx context.Context, e broker.Envelope) (broker.ListRe
 			CreatedAt: en.Record.CreatedAt, UpdatedAt: en.Record.UpdatedAt,
 		}
 		meta.Grant, meta.GrantNote = listedGrant(st, en, e.Session, listCwd, now)
+		if u, ok := usage[en.Record.ID]; ok {
+			meta.LastUsedAt, meta.LastExitCode, meta.LastOKAt = u.LastUsedAt, u.LastExitCode, u.LastOKAt
+		}
 		if until, ok := en.Record.PreviousUntil(); ok {
 			meta.PreviousUntil = until.UTC().Format(time.RFC3339)
 		}

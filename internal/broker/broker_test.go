@@ -147,7 +147,7 @@ func TestErrorsNeverEchoInput(t *testing.T) {
 
 func TestCapabilities(t *testing.T) {
 	got := string(Handle(context.Background(), []byte(env("capabilities", "")), &fake{}, TransportHost))
-	want := `{"ok":true,"contract":"qbit-vault.secrets-broker/v1","capabilities":"1.1","ops":["request","list","exec","manage","check","grant","revoke","capabilities"],"layers":["global","project"],"prompt_backends":["zenity","tty"],"field_kinds":["secret","text"],"max_fields":8,"keychain":"secret-service","streaming":true,"sync":false,"refusal_hints":1,"dialog_locale":1,"secret_check":1,"value_revert":1}` + "\n"
+	want := `{"ok":true,"contract":"qbit-vault.secrets-broker/v1","capabilities":"1.1","ops":["request","list","exec","manage","check","grant","revoke","capabilities"],"layers":["global","project"],"prompt_backends":["zenity","tty"],"field_kinds":["secret","text"],"max_fields":8,"keychain":"secret-service","streaming":true,"sync":false,"refusal_hints":1,"dialog_locale":1,"secret_check":1,"value_revert":1,"last_use":1}` + "\n"
 	if got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

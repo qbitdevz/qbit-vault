@@ -135,7 +135,7 @@ func TestSetJSONAndReplace(t *testing.T) {
 		t.Fatalf("out=%q", out)
 	}
 	_, out, _ = w.run("", "--json", "describe", "A_KEY")
-	want = `{"ok":true,"name":"A_KEY","layer":"global","project":null,"overrides_global":false,"description":"first","sensitive":true,"binaries":["gh","git"],"hosts":["api.github.com"],"created_at":"TS","updated_at":"TS","grants":[]}` + "\n"
+	want = `{"ok":true,"name":"A_KEY","layer":"global","project":null,"overrides_global":false,"description":"first","sensitive":true,"binaries":["gh","git"],"hosts":["api.github.com"],"created_at":"TS","updated_at":"TS","grants":[],"previous_until":"TS"}` + "\n"
 	if norm(out) != want {
 		t.Fatalf("out=%q", out)
 	}
@@ -145,7 +145,7 @@ func TestSetJSONAndReplace(t *testing.T) {
 	// Given again, metadata is replaced.
 	w.mustRun(fxVal, "set", "A_KEY", "--global", "--stdin", "--description", "second", "--sensitive=false", "--binaries", "", "--hosts", "")
 	_, out, _ = w.run("", "--json", "describe", "A_KEY")
-	want = `{"ok":true,"name":"A_KEY","layer":"global","project":null,"overrides_global":false,"description":"second","sensitive":false,"binaries":[],"hosts":[],"created_at":"TS","updated_at":"TS","grants":[]}` + "\n"
+	want = `{"ok":true,"name":"A_KEY","layer":"global","project":null,"overrides_global":false,"description":"second","sensitive":false,"binaries":[],"hosts":[],"created_at":"TS","updated_at":"TS","grants":[],"previous_until":"TS"}` + "\n"
 	if norm(out) != want {
 		t.Fatalf("out=%q", out)
 	}

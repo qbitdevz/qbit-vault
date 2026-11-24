@@ -48,6 +48,9 @@ const (
 	// ValueRevert is the capability row for the `revert` action of manage and
 	// the optional `previous_until` of list (CONTRACT.md § Previous value).
 	ValueRevert = 1
+	// LastUse is the capability row for the optional last_used_at,
+	// last_exit_code and last_ok_at of list (CONTRACT.md § Last use).
+	LastUse = 1
 	// MaxRequestBytes bounds one request.
 	MaxRequestBytes = 64 << 10
 
@@ -330,6 +333,7 @@ func capabilities(info Info) any {
 		DialogLocale   int      `json:"dialog_locale"`
 		SecretCheck    int      `json:"secret_check"`
 		ValueRevert    int      `json:"value_revert"`
+		LastUse        int      `json:"last_use"`
 		ExecJobs       int      `json:"exec_jobs,omitempty"`
 	}
 	pb := info.PromptBackends
@@ -337,7 +341,7 @@ func capabilities(info Info) any {
 		pb = []string{}
 	}
 	c := caps{OK: true, Contract: Contract, Capabilities: Capabilities, Ops: ops, Layers: layers,
-		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints, DialogLocale: DialogLocale, SecretCheck: SecretCheck, ValueRevert: ValueRevert}
+		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints, DialogLocale: DialogLocale, SecretCheck: SecretCheck, ValueRevert: ValueRevert, LastUse: LastUse}
 	if info.ExecJobs {
 		c.ExecJobs = ExecJobs
 	}

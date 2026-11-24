@@ -90,6 +90,8 @@ Response:
 
 `grant` is the grant `exec` would accept for this secret from `cwd` and this session (the same check, run without spending a `once` grant): `null` when none applies. A grant that exists but does not apply here is never shown as active. In that case the optional `grant_note` says why and what to do: `a project grant exists for another directory; call secret_request` (a project grant of a global secret covers only the repository it was approved in) or `the grant is for an earlier value of this secret; call secret_request` (the value was replaced). The field is absent when there is nothing to say; clients that do not know it ignore it (added in 1.1.0, additive, issue #42).
 
+`last_used_at`, `last_exit_code` and `last_ok_at` are the last use of the secret on this device (§ Last use); each is absent for a secret never used here.
+
 `previous_until` is present only while the secret has a previous value the user can restore (§ Previous value): an RFC 3339 time, the end of the 7 days that started when the value was replaced. It is a time, never the value, nor its length; absent when there is none, and clients that do not know it ignore it (additive, issue #62).
 
 Returns the secrets that resolve from `cwd`: every secret of the current project layer, plus every global secret not overridden by it. `project` is `null` outside a repository. Other projects' secrets are never listed. Never values. `unlinked_match` is `{ "label": "shop-api" }` when sync brought a project layer from another device whose origin URL matches this repository but the user has not linked it here (`REMOTE_SYNC.md` § 7.5): the agent may suggest that the user run `qbit-vault link shop-api`; it cannot link it itself. Otherwise `null`.
@@ -298,7 +300,7 @@ Response:
   "layers": ["global","project"],
   "prompt_backends": ["pi-ui","osascript","powershell","zenity","kdialog","tty"],
   "field_kinds": ["secret","text"], "max_fields": 8,
-  "keychain": "secret-service", "streaming": true, "sync": false, "refusal_hints": 1, "dialog_locale": 1, "secret_check": 1, "value_revert": 1 }
+  "keychain": "secret-service", "streaming": true, "sync": false, "refusal_hints": 1, "dialog_locale": 1, "secret_check": 1, "value_revert": 1, "last_use": 1 }
 ```
 
 `refusal_hints: 1` is a capability row (additive, same major): the broker puts a `hint` on every refusal (and a `rule` on `dump_command`), see § Refusals. A host that does not find the row must not depend on those fields. The `capabilities` version string is unchanged.
@@ -309,11 +311,17 @@ Response:
 
 `value_revert: 1` is a capability row (additive, same major, issue #62): `manage` accepts the action `revert` and `list` may carry `previous_until` (§ Previous value). A host that does not find the row must not send `revert` (an older broker answers `invalid request: action`). The `capabilities` version string stays `1.1`.
 
+`last_use: 1` is a capability row (additive, same major, issue #62): `list` may carry `last_used_at`, `last_exit_code` and `last_ok_at` (§ Last use). Clients that do not know the fields ignore them. The `capabilities` version string stays `1.1`.
+
 `dialog_locale: 1` is a capability row (additive, same major, issue #63): `request`, `list`, `exec`, `manage` and `check` accept the optional `locale` field below. A host that does not find the row must not send it (an older broker refuses an unknown field). The `capabilities` version string stays `1.1`.
 
 ## Previous value
 
 Replacing a stored value (`manage` `replace`, a `request` capture over an existing name, `qbit-vault set` over one, an import over one) keeps the value it replaced, once, with the record, for **7 days** (issue #62; where and how it is stored: `STORAGE.md` § Previous value). The model never sees it. It learns only that one is recoverable (`previous_until` in `list`) and may **propose** `manage` `revert`; the user confirms in a dialog, or runs `qbit-vault revert NAME` themselves. A revert swaps the two values and restarts the 7 days for the one it set aside; it gives the record a new id and drops its grants like a replace, so a permission never carries over to a different value. A second replace discards the older previous value, removing the secret removes it, and after 7 days it is gone for every reader. `secret_check` describes only the current value and is not extended. `exec` injects and redacts only current values; the hooks' guards also redact a recoverable previous value.
+
+## Last use
+
+For each secret `list` may add three optional fields, the last use **on this device** (issue #62; where it is kept: `STORAGE.md` § Usage file): `last_used_at` (RFC 3339), the end of the last command that had the secret injected (`exec`, `exec_start` jobs when they end, the command line `exec`); `last_exit_code`, the exit code of that command; `last_ok_at`, the end of the last such command that exited 0. They are absent for a secret that was never used on this device, `last_ok_at` is absent while no use ended with 0, and a replaced or reverted value starts with none (the history is keyed by the record's id). They never hold the command, its arguments or output, the working directory or the session, and they are not synced: another device keeps its own. An exit code of 0 is a hint, not proof that the service accepted the credential. Recording a use never writes the vault, never fails or changes a command's output or exit code, and a file that cannot be read means no history.
 
 ## Dialog language
 

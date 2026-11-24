@@ -365,6 +365,8 @@ type execRun struct {
 	// set OnStart before run.
 	spec       runner.Spec
 	notStarted bool
+	// dropped is set when dropVault wiped the session's key.
+	dropped bool
 }
 
 // prepareExec runs steps 1 to 8 of docs/CLI.md § Exec. On any failure it
@@ -534,6 +536,7 @@ func (g *globals) prepareExec(stderr io.Writer, p execPlan) (x *execRun, err err
 func (x *execRun) run(ctx context.Context) (runner.Result, error) {
 	res, runErr := runCommand(ctx, x.spec)
 	x.notStarted = !res.Started
+	x.recordUse(res)
 
 	fin := audit.Record{
 		Event: audit.EventExec, Names: x.p.names, Layer: x.rec.Layer, Outcome: outcomeFinished,
@@ -557,11 +560,44 @@ func (x *execRun) run(ctx context.Context) (runner.Result, error) {
 	return res, runErr
 }
 
+// recordUse notes the end of a command that had these records injected in the
+// local usage file (STORAGE.md § Usage file; issue #62): the time, the exit
+// code and, for exit 0, the time of the last success. It never writes the
+// vault, and a failure never reaches the caller: exec's output and exit code
+// are unchanged; the failure is a `warning` audit record and `doctor` reports
+// a file that cannot be read. After dropVault the key is gone, so the vault is
+// reopened without asking (nothing when that would need a passphrase).
+func (x *execRun) recordUse(res runner.Result) {
+	if !res.Started || len(x.recs) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(x.recs))
+	for _, e := range x.recs {
+		ids = append(ids, e.Record.ID)
+	}
+	fail := func() {
+		x.g.record(io.Discard, audit.Record{Event: audit.EventWarning, Names: x.p.names, Detail: "usage not recorded"})
+	}
+	s := x.s
+	if x.dropped {
+		var err error
+		if s, err = x.g.openSessionQuiet(); err != nil {
+			fail()
+			return
+		}
+		defer s.close()
+	}
+	if err := s.v.RecordUses(ids, clock(), res.ExitCode); err != nil {
+		fail()
+	}
+}
+
 // dropVault wipes what a command that is already running no longer needs from
 // this process: the vault key and the stored values (the child has its
 // copies in its environment, the redactor its own). Only the once grants of a
 // command that never started need the session, and that is not this case.
 func (x *execRun) dropVault() {
+	x.dropped = true
 	wipeEntries(x.recs)
 	if x.s != nil {
 		x.s.close()

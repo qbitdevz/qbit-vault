@@ -60,6 +60,8 @@ var ErrLocked = errors.New("vault locked")
 type Opened struct {
 	Keychain    string // the key holder's name
 	GrantsReset bool   // grants.enc was unreadable or rolled back
+	// UsageUnreadable: usage.enc cannot be trusted; the last-use history is empty.
+	UsageUnreadable bool
 }
 
 // Inputs are the facts doctor cannot get on its own.
@@ -124,6 +126,9 @@ func Run(in Inputs) Report {
 	if err == nil && opened.GrantsReset {
 		add("grants", Warn, "grants.enc is unreadable or was rolled back; its grants are treated as none")
 	}
+	if err == nil && opened.UsageUnreadable {
+		add("usage", Warn, "usage.enc is unreadable; the last-use history is empty and the next use replaces it")
+	}
 	cs = append(cs, auditChecks(in.Home)...)
 	cs = append(cs, hostChecks(in)...)
 	cs = append(cs, syncChecks(in.Home)...)
@@ -132,7 +137,7 @@ func Run(in Inputs) Report {
 
 // permissionProblem names the first vault file that is not owner-only.
 func permissionProblem(home string) string {
-	for _, name := range []string{"", "vault.enc", "key.enc", "state.json", "grants.enc", "audit.jsonl", "audit.head"} {
+	for _, name := range []string{"", "vault.enc", "key.enc", "state.json", "grants.enc", "usage.enc", "audit.jsonl", "audit.head"} {
 		p := filepath.Join(home, name)
 		if _, err := os.Stat(p); err != nil {
 			continue

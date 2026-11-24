@@ -136,6 +136,13 @@ type SecretMeta struct {
 	// recoverable by a revert (RFC 3339). Optional and additive: present only
 	// while a previous value exists. It is a time, never the value.
 	PreviousUntil string `json:"previous_until,omitempty"`
+	// LastUsedAt, LastExitCode and LastOKAt are the last use of this secret
+	// on this device (CONTRACT.md § Last use): when a command last had it
+	// injected, how that command ended, and when one last ended with exit 0.
+	// Optional and additive; never a command, an output or a value.
+	LastUsedAt   string `json:"last_used_at,omitempty"`
+	LastExitCode *int   `json:"last_exit_code,omitempty"`
+	LastOKAt     string `json:"last_ok_at,omitempty"`
 }
 
 // Notes for SecretMeta.GrantNote. Fixed text: no path, no value.

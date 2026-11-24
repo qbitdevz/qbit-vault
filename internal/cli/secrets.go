@@ -86,6 +86,11 @@ type describeBody struct {
 	// PreviousUntil is when the value this one replaced stops being
 	// recoverable (qbit-vault revert); absent when there is none.
 	PreviousUntil string `json:"previous_until,omitempty"`
+	// LastUsedAt, LastExitCode and LastOKAt: the last use on this device
+	// (STORAGE.md § Usage file); absent for a record never used.
+	LastUsedAt   string `json:"last_used_at,omitempty"`
+	LastExitCode *int   `json:"last_exit_code,omitempty"`
+	LastOKAt     string `json:"last_ok_at,omitempty"`
 }
 
 type listEntry struct {
@@ -102,8 +107,11 @@ type listEntry struct {
 	// Unlinked marks a layer synced from another device that has no root
 	// on this one (qbit-vault link binds it).
 	Unlinked bool `json:"unlinked,omitempty"`
-	// PreviousUntil: see describeBody.
+	// PreviousUntil, LastUsedAt, LastExitCode and LastOKAt: see describeBody.
 	PreviousUntil string `json:"previous_until,omitempty"`
+	LastUsedAt    string `json:"last_used_at,omitempty"`
+	LastExitCode  *int   `json:"last_exit_code,omitempty"`
+	LastOKAt      string `json:"last_ok_at,omitempty"`
 }
 
 type listBody struct {
@@ -610,6 +618,8 @@ func newDescribe(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			usage, _ := s.v.Usage() // unreadable: empty history, doctor says so
+			use := usage[e.Record.ID]
 			if g.JSON {
 				shown := []describeGrant{}
 				for _, gr := range active {
@@ -620,6 +630,7 @@ func newDescribe(g *globals) *cobra.Command {
 					OverridesGlobal: e.OverridesGlobal, Description: r.Description, Sensitive: r.Sensitive,
 					Binaries: nonNil(r.Binaries), Hosts: nonNil(r.Hosts), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 					Grants: shown, PreviousUntil: previousUntilText(r),
+					LastUsedAt: use.LastUsedAt, LastExitCode: use.LastExitCode, LastOKAt: use.LastOKAt,
 				})
 			}
 			var b strings.Builder
@@ -641,6 +652,13 @@ func newDescribe(g *globals) *cobra.Command {
 					texts[i] = grantText(gr)
 				}
 				fmt.Fprintf(&b, "  grants:      %s\n", strings.Join(texts, "; "))
+			}
+			// A secret never used here shows no line, so its describe is unchanged.
+			if use.LastUsedAt != "" {
+				fmt.Fprintf(&b, "  last used:   %s%s\n", use.LastUsedAt, exitText(use.LastExitCode))
+				if use.LastOKAt != "" {
+					fmt.Fprintf(&b, "  last ok:     %s\n", use.LastOKAt)
+				}
 			}
 			if until := previousUntilText(r); until != "" {
 				fmt.Fprintf(&b, "  previous:    recoverable until %s (qbit-vault revert %s)\n", until, name)
@@ -749,6 +767,7 @@ func newList(g *globals) *cobra.Command {
 				return mapErr(err, "")
 			}
 			defer wipeEntries(entries)
+			usage, _ := s.v.Usage() // unreadable: empty history, doctor says so
 			var shown []vault.Entry
 			for _, e := range entries {
 				switch layer {
@@ -778,6 +797,9 @@ func newList(g *globals) *cobra.Command {
 					}
 					le.Unlinked = e.Unlinked
 					le.PreviousUntil = previousUntilText(e.Record)
+					if u, ok := usage[e.Record.ID]; ok {
+						le.LastUsedAt, le.LastExitCode, le.LastOKAt = u.LastUsedAt, u.LastExitCode, u.LastOKAt
+					}
 					body.Secrets = append(body.Secrets, le)
 				}
 				return writeJSON(out, body)
@@ -834,6 +856,14 @@ func listTable(es []vault.Entry) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// exitText is " (exit N)" for a recorded exit code, or "".
+func exitText(code *int) string {
+	if code == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (exit %d)", *code)
 }
 
 // previousUntilText is the end of the revert window as RFC 3339 UTC, or "".
