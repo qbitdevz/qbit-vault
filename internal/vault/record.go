@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"time"
 
 	"github.com/qbitdevz/qbit-vault/internal/secret"
 )
@@ -26,6 +27,21 @@ type Record struct {
 	Hosts       []string
 	CreatedAt   string
 	UpdatedAt   string
+	// PreviousReplacedAt is when the value this record replaced was replaced
+	// (RFC 3339), empty when no previous value is recoverable. It is only a
+	// marker: the value itself is read through PreviousValues and written by
+	// the vault, never carried by a Record (STORAGE.md § Previous value).
+	PreviousReplacedAt string
+}
+
+// PreviousUntil is when the previous value stops being recoverable, and false
+// when there is none.
+func (r Record) PreviousUntil() (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, r.PreviousReplacedAt)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t.Add(PreviousRetention), true
 }
 
 // Entry is a record together with where it lives, as returned by listings.
@@ -54,6 +70,16 @@ type wireRecord struct {
 	UpdatedAt   string   `json:"updated_at"`
 	// HLC is the hybrid logical clock of the record's last change (schema 2).
 	HLC string `json:"hlc,omitempty"`
+	// Previous is the value this one replaced, kept for PreviousRetention. An
+	// older binary ignores the field and drops it on its next save of the
+	// record (additive: schema stays 2).
+	Previous *wirePrevious `json:"previous,omitempty"`
+}
+
+// wirePrevious is the one previous value of a record and when it was replaced.
+type wirePrevious struct {
+	Value      string `json:"value"`
+	ReplacedAt string `json:"replaced_at"`
 }
 
 // projectBody is one project layer. ID is stable across devices; Roots maps
@@ -104,16 +130,24 @@ func toWire(r Record) wireRecord {
 
 func fromWire(name string, w wireRecord) Record {
 	return Record{
-		ID:          w.ID,
-		Value:       secret.New(name, []byte(w.Value)),
-		Kind:        w.Kind,
-		Description: w.Description,
-		Sensitive:   w.Sensitive,
-		Binaries:    append([]string(nil), w.Binaries...),
-		Hosts:       append([]string(nil), w.Hosts...),
-		CreatedAt:   w.CreatedAt,
-		UpdatedAt:   w.UpdatedAt,
+		ID:                 w.ID,
+		Value:              secret.New(name, []byte(w.Value)),
+		Kind:               w.Kind,
+		Description:        w.Description,
+		Sensitive:          w.Sensitive,
+		Binaries:           append([]string(nil), w.Binaries...),
+		Hosts:              append([]string(nil), w.Hosts...),
+		CreatedAt:          w.CreatedAt,
+		UpdatedAt:          w.UpdatedAt,
+		PreviousReplacedAt: replacedAt(w),
 	}
+}
+
+func replacedAt(w wireRecord) string {
+	if w.Previous == nil {
+		return ""
+	}
+	return w.Previous.ReplacedAt
 }
 
 func nonNil(s []string) []string {

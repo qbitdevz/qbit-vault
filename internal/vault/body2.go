@@ -94,6 +94,7 @@ func decodeBody(pt []byte, device string) (*body, error) {
 		}
 		b.Projects[root] = pb
 	}
+	b.pruneExpired(now)
 	b.clock = newClock(device, b)
 	return b, nil
 }
