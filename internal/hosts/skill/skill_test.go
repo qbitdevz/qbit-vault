@@ -368,3 +368,17 @@ func TestSkillRoutesLongCommandsThroughJobs(t *testing.T) {
 		}
 	}
 }
+
+// Verifier findings F2 and F4: the skill tells the true lag and the cap on unread results.
+func TestSkillStatesTheLagAndTheUnreadJobCap(t *testing.T) {
+	s := string(skill.Content)
+	for _, want := range []string{
+		"only the end of a line that could be the start of a secret value is held back",
+		"at most 8 finished jobs you have not read",
+		"read a job's result before starting many more",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
+		}
+	}
+}

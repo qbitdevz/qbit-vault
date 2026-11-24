@@ -103,7 +103,7 @@ type job struct {
 
 // stream is the redacted output not yet reported. It only ever holds bytes
 // the redactor has already emitted; what it still withholds is in the
-// redactor's own carry-over.
+// redactor's own carry-over (an ending that may still become a value).
 type stream struct {
 	buf     []byte
 	dropped bool
