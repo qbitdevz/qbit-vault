@@ -346,35 +346,63 @@ func truncateUTF8(s string, n int) string {
 	return s[:n] + "...[truncated]"
 }
 
-func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
-	stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
+// execRun is an exec that has passed everything that can refuse it: the
+// secrets are resolved, the grants checked, the command cleared by the dump
+// guard and the binary rules, the redactor built, the once grants claimed and
+// the started record appended. No process exists yet. It is the single path
+// of `qbit-vault exec`, the contract's `exec` and the MCP jobs, so a fix
+// to any step applies to all of them. The caller must call close exactly once.
+type execRun struct {
+	g       *globals
+	s       *session
+	stderr  io.Writer
+	p       execPlan
+	recs    []vault.Entry
+	red     *redact.Redactor
+	rec     audit.Record
+	claimed []grants.Grant
+	// spec is what runs; the caller sets its output (Stdout, Stderr) and may
+	// set OnStart before run.
+	spec       runner.Spec
+	notStarted bool
+}
+
+// prepareExec runs steps 1 to 8 of docs/CLI.md § Exec. On any failure it
+// releases what it took (nothing is claimed after a failure) and the error is
+// the refusal. With a nil error the caller owns the result.
+func (g *globals) prepareExec(stderr io.Writer, p execPlan) (x *execRun, err error) {
 	s, err := g.openSession()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer s.close()
+	x = &execRun{g: g, s: s, stderr: stderr, p: p, notStarted: true}
+	defer func() {
+		if err != nil {
+			x.close()
+			x = nil
+		}
+	}()
 
 	// 1. Resolve every secret from the working directory (S6).
 	byName := map[string]vault.Entry{}
-	var recs []vault.Entry
-	defer func() { wipeEntries(recs) }()
 	for _, name := range p.names {
 		e, err := findEntry(s, name, layerFlags{}, p.dir)
 		if err != nil {
 			g.searched = searchedNote(p.dir)
-			return err
+			return x, err
 		}
-		recs = append(recs, e)
+		x.recs = append(x.recs, e)
 		byName[name] = e
 	}
+	recs := x.recs
 	grantCwd, err := grantCwdOf(p.dir)
 	if err != nil {
-		return mapErr(err, "")
+		return x, mapErr(err, "")
 	}
 
 	// 2. Grants, without consuming anything yet.
 	if _, err := g.grantGate(stderr, s, recs, grantCwd, nil); err != nil {
-		return err
+		return x, err
 	}
 
 	// 3. Dump guard, over the names the child will see.
@@ -382,9 +410,9 @@ func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
 	if err != nil {
 		var pe *dumpguard.ParseError
 		if errors.As(err, &pe) && pe.Line > 0 {
-			return refusal.New(refusal.Internal, "").WithMessage(fmt.Sprintf("dumpguard.yaml is invalid at line %d", pe.Line))
+			return x, refusal.New(refusal.Internal, "").WithMessage(fmt.Sprintf("dumpguard.yaml is invalid at line %d", pe.Line))
 		}
-		return refusal.New(refusal.Internal, "").WithMessage("dumpguard.yaml cannot be read")
+		return x, refusal.New(refusal.Internal, "").WithMessage("dumpguard.yaml cannot be read")
 	}
 	injected := make([]string, len(p.secrets))
 	for i, sc := range p.secrets {
@@ -399,7 +427,7 @@ func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
 		hit, refused = guard.ExplainRaw(p.command, injected)
 	}
 	if refused {
-		return refusal.NewDump(refusal.Rule(hit.Class), hit.Segment)
+		return x, refusal.NewDump(refusal.Rule(hit.Class), hit.Segment)
 	}
 
 	// 4. Binary allowlist: every program the shell may start (L3).
@@ -411,7 +439,7 @@ func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
 		programs = []string{prog}
 		for _, e := range recs {
 			if len(e.Record.Binaries) > 0 && !simple {
-				return refusal.New(refusal.ScopeBinary, e.Name)
+				return x, refusal.New(refusal.ScopeBinary, e.Name)
 			}
 		}
 	}
@@ -425,7 +453,7 @@ func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
 		}
 		for _, prog := range programs {
 			if prog == dumpguard.Ambiguous || (!builtins[prog] && !allowed[prog]) {
-				return refusal.New(refusal.ScopeBinary, e.Name)
+				return x, refusal.New(refusal.ScopeBinary, e.Name)
 			}
 		}
 	}
@@ -433,7 +461,7 @@ func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
 	// 4b. On Windows a bare bash or sh is Git's, never the WSL launcher; with
 	// no Git for Windows the command cannot run (D1).
 	if runtime.GOOS == "windows" && !runner.PosixShellAvailable() && dumpguard.InvokesBare(p.command, "bash", "sh") {
-		return refusal.New(refusal.Internal, "").WithMessage(msgNoPosixShell)
+		return x, refusal.New(refusal.Internal, "").WithMessage(msgNoPosixShell)
 	}
 
 	// 5. Hosts are advisory (R-EXEC-08): the audit notes it, the run goes on.
@@ -447,78 +475,68 @@ func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
 	for i, e := range recs {
 		values[i] = e.Record.Value
 	}
-	red, err := redact.New(values)
+	x.red, err = redact.New(values)
 	if err != nil {
-		return refusal.New(refusal.Internal, "")
+		x.red = nil
+		return x, refusal.New(refusal.Internal, "")
 	}
-	defer red.Wipe()
-	for _, n := range red.Warnings() {
+	for _, n := range x.red.Warnings() {
 		g.record(stderr, audit.Record{Event: audit.EventWarning, Names: []string{n}, Detail: "short value"})
 	}
-	shown, _ := red.Bytes([]byte(p.command))
+	shown, _ := x.red.Bytes([]byte(p.command))
 	if shown == nil {
-		return refusal.New(refusal.Internal, "")
+		return x, refusal.New(refusal.Internal, "")
 	}
 
 	// Everything that can fail before the child exists is resolved before the
 	// once grants are claimed.
 	scrub, err := g.vaultNames(s)
 	if err != nil {
-		return err
+		return x, err
 	}
 
 	// 7. Claim once grants and append the started record, fail-closed (L2).
-	rec := audit.Record{
+	x.rec = audit.Record{
 		Event: audit.EventExec, Names: p.names, Layer: sharedLayer(recs), Cwd: p.dir,
 		Command: truncateUTF8(string(shown), auditCommandLimit), Outcome: outcomeStarted,
 	}
 	if hostsWarning {
-		rec.Detail = "hosts warning"
+		x.rec.Detail = "hosts warning"
 	}
-	claimed, err := g.grantGate(stderr, s, recs, grantCwd, &rec)
+	x.claimed, err = g.grantGate(stderr, s, recs, grantCwd, &x.rec)
 	if err != nil {
-		return err
+		return x, err
 	}
-	notStarted := true
-	defer func() {
-		if notStarted {
-			g.releaseOnce(stderr, s, claimed)
-		}
-	}()
 
-	// 8. Run.
-	spec := runner.Spec{
-		Command: p.command, Shell: p.shell, Dir: p.dir, Timeout: p.timeout, Redactor: red,
+	// 8. The spec of the run.
+	x.spec = runner.Spec{
+		Command: p.command, Shell: p.shell, Dir: p.dir, Timeout: p.timeout, Redactor: x.red,
 		Env: map[string]secret.Secret{},
 	}
 	for _, sc := range p.secrets {
-		spec.Env[sc.env] = byName[sc.name].Record.Value
+		x.spec.Env[sc.env] = byName[sc.name].Record.Value
 	}
-	spec.ScrubNames = scrub
+	x.spec.ScrubNames = scrub
 	if stdinOverride != nil {
-		spec.Stdin = stdinOverride
+		x.spec.Stdin = stdinOverride
 	}
 	if g.execStdin != nil {
 		// The broker's own stdin is the request (or the MCP stream): the
 		// child never inherits it.
-		spec.Stdin = g.execStdin
+		x.spec.Stdin = g.execStdin
 	}
-	captured := g.JSON && !stream
-	switch {
-	case !g.JSON:
-		spec.Stdout, spec.Stderr = stdout, stderr
-	case stream:
-		w := newChunkWriters(stdout)
-		spec.Stdout, spec.Stderr = w.stdout, w.stderr
-	}
-	ctx, stop := signal.NotifyContext(commandContext(cmd), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	res, runErr := runCommand(ctx, spec)
-	notStarted = !res.Started
+	return x, nil
+}
 
-	// 9. The finished record is best effort.
+// run starts the child and waits for it, then appends the finished record
+// (best effort, step 9). A once grant claimed by prepareExec stays spent only
+// if the child was created.
+func (x *execRun) run(ctx context.Context) (runner.Result, error) {
+	res, runErr := runCommand(ctx, x.spec)
+	x.notStarted = !res.Started
+
 	fin := audit.Record{
-		Event: audit.EventExec, Names: p.names, Layer: rec.Layer, Outcome: outcomeFinished,
+		Event: audit.EventExec, Names: x.p.names, Layer: x.rec.Layer, Outcome: outcomeFinished,
 		ExitCode: &res.ExitCode, Redactions: res.Redactions,
 	}
 	ms := res.Duration.Milliseconds()
@@ -533,9 +551,50 @@ func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
 	case runErr != nil:
 		fin.Outcome = outcomeError
 	}
-	if err := g.auditExec(fin); err != nil {
-		_, _ = io.WriteString(stderr, auditWriteWarning)
+	if err := x.g.auditExec(fin); err != nil {
+		_, _ = io.WriteString(x.stderr, auditWriteWarning)
 	}
+	return res, runErr
+}
+
+// close gives back the once grants of a command that never started, then
+// wipes the values, the redactor and the vault key. A failed prepareExec
+// calls it itself.
+func (x *execRun) close() {
+	if x.s != nil && x.claimed != nil && x.notStarted {
+		x.g.releaseOnce(x.stderr, x.s, x.claimed)
+	}
+	x.claimed = nil
+	if x.red != nil {
+		x.red.Wipe()
+	}
+	wipeEntries(x.recs)
+	if x.s != nil {
+		x.s.close()
+	}
+}
+
+func (g *globals) runExec(cmd *cobra.Command, p execPlan, stream bool) error {
+	stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	x, err := g.prepareExec(stderr, p)
+	if err != nil {
+		return err
+	}
+	defer x.close()
+
+	// 8. Run.
+	captured := g.JSON && !stream
+	switch {
+	case !g.JSON:
+		x.spec.Stdout, x.spec.Stderr = stdout, stderr
+	case stream:
+		w := newChunkWriters(stdout)
+		x.spec.Stdout, x.spec.Stderr = w.stdout, w.stderr
+	}
+	ctx, stop := signal.NotifyContext(commandContext(cmd), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	res, runErr := x.run(ctx)
+	ms := res.Duration.Milliseconds()
 
 	// 10. Report.
 	switch {
