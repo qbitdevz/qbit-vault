@@ -50,6 +50,12 @@ func init() {
 		"opt.without":    "Without them (recommended)",
 		"opt.as_typed":   "Keep it as typed",
 
+		// A typed value that repeats another one (names only, never a value).
+		"q.same_replaced": "The new value of %[1]s is the same as the one it replaces.",
+		"q.same_other":    "The value of %[1]s is the same as the value of %[2]s.",
+		"q.same_save":     "That is often a mistake (the wrong field, or something that did not change). Save it anyway?",
+		"opt.save_anyway": "Save anyway",
+
 		// Unlocking the vault for an agent.
 		"unlock.none":  "%[1]s needs the vault. Unlock it to continue.",
 		"unlock.wants": "%[1]s wants to use %[2]s. Unlock the vault to continue.",

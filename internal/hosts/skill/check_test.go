@@ -32,6 +32,8 @@ func TestSkillDiagnosesARejectedCredentialWithSecretCheck(t *testing.T) {
 		"does not look like an email and holds the same value as",
 		"only for the secret the evidence points to",
 		"before you propose a `secret_manage` replace",
+		"asks the user before saving a value that equals the one it replaces",
+		"you are never told which secret matched",
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("the rejected-credential section does not say %q", want)

@@ -56,6 +56,8 @@ Request, several fields in one prompt:
 
 Behavior: the broker opens **one user-facing prompt** (host UI or native) for all fields. A field whose name resolves for `cwd` is shown as *already stored* and gets no box; every other field gets a box (masked for `secret`, visible for `text`). The prompt asks the layer once for the new values (when `cwd` is in a repository) and one scope for all fields, offering only scopes every field allows (a `sensitive` one limits all to `once`). It is all-or-nothing: a blank box, a cancel or a timeout stores nothing and grants nothing. On confirmation every new value is stored and every field's record is granted with the chosen scope. The model is not told which fields were already stored. A name in its cooldown makes the whole request `rate_limited` (naming it); a decline starts the cooldown for every name in the request. With sync enabled the broker pulls first (bounded, `REMOTE_SYNC.md` § 7.1), so a secret stored on another machine is found.
 
+Same-value warning (issue #62): after every box is typed and before anything is stored, if a typed value equals the value of another secret in the layer it will be saved in, or another box of the same prompt, the user is asked once (one dialog for the whole form, naming the secrets, never a value or a length) whether to save anyway. Declining is declining the request: `user_declined`, nothing stored or granted, the cooldown above. The model is not told which secret matched.
+
 Response:
 ```json
 { "ok": true,
@@ -206,6 +208,8 @@ Request:
 - `replace`: one decision, then the masked capture for the new value. The decision offers `Replace, allow once` (preselected) and, where the record allows it, `Replace, always in this project` (never a session answer), then `Replace, but ask me before each use` and `Don't replace` (a decline). The old grants are dropped; the picked scope, if any, becomes a new prompt-token grant on the new value for this envelope's session, so the agent's next `exec` needs no second permission dialog.
 
 Except for the grant the user picks in a `replace` decision, `manage` never creates a grant. Declines start the same per-name cooldown as `request`.
+
+Same-value warning (issue #62): after the new value of a `replace` is typed, and before it is stored, the user is asked once when it equals the value it replaces or the value of another secret in the same layer (the dialog names the secrets, never a value or a length). Declining is declining the `replace`: `user_declined`, the old value and its grants stay, the cooldown above. The model is not told which secret matched.
 
 Response:
 ```json

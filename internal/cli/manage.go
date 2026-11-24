@@ -199,6 +199,20 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 			return broker.ManageResponse{}, refusal.New(refusal.Internal, "").WithMessage(msgNoPrompt)
 		}
 		defer clear(reviewed)
+		found, ferr := s.sameValues([]typedValue{{name: r.Name, layer: en.Layer, value: reviewed}})
+		if ferr != nil {
+			return broker.ManageResponse{}, asRefusal(mapErr(ferr, r.Name))
+		}
+		cerr := confirmSameValues(ask, loc, found)
+		if g.callGone() {
+			return broker.ManageResponse{}, errCallCancelled()
+		}
+		if cerr != nil {
+			if gaveUp(cerr) {
+				return broker.ManageResponse{}, declined()
+			}
+			return broker.ManageResponse{}, refusal.New(refusal.Internal, "").WithMessage(msgNoPrompt)
+		}
 		rec.Value = secret.New(r.Name, reviewed)
 		_, err = s.v.ReplaceWithGrants(en.Layer, r.Name, rec, ed)
 		after = ptr(layerName(en.Layer))

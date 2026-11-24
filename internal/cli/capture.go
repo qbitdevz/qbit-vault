@@ -182,7 +182,11 @@ func askValue(ask prompt.Backend, loc i18n.Locale, req prompt.SecretRequest, hin
 // masked value then, when a grant was asked for, the scope. The caller wipes
 // the returned bytes. Nothing has been written when it fails, so a cancel
 // leaves the vault as it was (R-CAP-04).
-func (g *globals) captureValue(ask prompt.Backend, name string, layer vault.Layer, existing bool, flagScope grants.Scope, sensitive bool) ([]byte, grants.Scope, error) {
+//
+// confirm, when set, is called with the value once it is typed and reviewed and
+// before the scope question: an error (a declined warning is prompt.ErrCancelled)
+// ends the capture like a cancelled dialog.
+func (g *globals) captureValue(ask prompt.Backend, name string, layer vault.Layer, existing bool, flagScope grants.Scope, sensitive bool, confirm func(v []byte) error) ([]byte, grants.Scope, error) {
 	loc := g.loc()
 	raw, err := askValue(ask, loc, prompt.SecretRequest{
 		Name: name, Reason: manualReason(loc), Host: "cli", Session: g.Session,
@@ -190,6 +194,12 @@ func (g *globals) captureValue(ask prompt.Backend, name string, layer vault.Laye
 	}, "use --stdin")
 	if err != nil {
 		return nil, "", err
+	}
+	if confirm != nil {
+		if err := confirm(raw); err != nil {
+			clear(raw)
+			return nil, "", promptFail(err, "use --stdin")
+		}
 	}
 	if flagScope == "" {
 		return raw, "", nil

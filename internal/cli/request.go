@@ -207,6 +207,21 @@ func (b *cliBackend) Request(ctx context.Context, e broker.Envelope, r broker.Re
 		a.value = reviewed
 	}
 
+	// The same value twice, or the value of another secret of the layer: one
+	// question for the whole form, after every box and before anything is
+	// stored. Declining is declining the capture, with the usual cooldown.
+	typed := make([]typedValue, len(fresh))
+	for i, a := range fresh {
+		typed[i] = typedValue{name: a.f.Name, layer: layer, value: a.value}
+	}
+	found, ferr := s.sameValues(typed)
+	if ferr != nil {
+		return broker.RequestResponse{}, asRefusal(mapErr(ferr, ""))
+	}
+	if err := confirmSameValues(ask, loc, found); err != nil {
+		return broker.RequestResponse{}, fail(err)
+	}
+
 	// One scope for all: only those every field allows.
 	scopes := scopeOrder
 	for _, a := range fields {

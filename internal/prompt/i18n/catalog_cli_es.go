@@ -40,6 +40,11 @@ func init() {
 		"opt.without":    "Sin los caracteres adicionales (recomendado)",
 		"opt.as_typed":   "Conservarlo tal como se escribió",
 
+		"q.same_replaced": "El nuevo valor de %[1]s es igual al que reemplaza.",
+		"q.same_other":    "El valor de %[1]s es igual al valor de %[2]s.",
+		"q.same_save":     "Suele ser un error (un campo equivocado, o algo que no cambió). ¿Quieres guardarlo de todos modos?",
+		"opt.save_anyway": "Guardar de todos modos",
+
 		"unlock.none":  "%[1]s necesita la bóveda. Desbloquéala para continuar.",
 		"unlock.wants": "%[1]s quiere usar %[2]s. Desbloquea la bóveda para continuar.",
 		"unlock.more":  "%[1]s y %[2]d más",

@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -375,6 +376,9 @@ func TestCheckOnALockedVaultAsksForTheUnlockOnly(t *testing.T) {
 	}
 	if got := w.auditUnlocks(); len(got) == 0 || !slices.Equal(got[len(got)-1].Names, []string{"A"}) {
 		t.Errorf("unlock audit = %+v", got)
+	}
+	if fmt.Sprintf("%+v", f.Calls) != strings.ReplaceAll(fmt.Sprintf("%+v", f.Calls), fxAgentValue, "") {
+		t.Errorf("the dialog transcript holds the value: %+v", f.Calls)
 	}
 	// Declined: the vault stays locked and nothing is described.
 	withBackend(t, answers(cancel()))

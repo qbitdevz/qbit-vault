@@ -422,7 +422,14 @@ func newSet(g *globals) *cobra.Command {
 						return grantErr(err, name)
 					}
 				}
-				raw, chosen, err := g.captureValue(ask, name, layer, replaced, scope, rec.Sensitive)
+				loc := g.loc()
+				raw, chosen, err := g.captureValue(ask, name, layer, replaced, scope, rec.Sensitive, func(v []byte) error {
+					found, err := s.sameValues([]typedValue{{name: name, layer: layer, value: v}})
+					if err != nil {
+						return mapErr(err, name)
+					}
+					return confirmSameValues(ask, loc, found)
+				})
 				if err != nil {
 					return err
 				}
