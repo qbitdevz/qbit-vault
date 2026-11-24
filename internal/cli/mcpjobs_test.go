@@ -653,3 +653,29 @@ func TestMCPJobLeakBattery(t *testing.T) {
 		return nil
 	})
 }
+
+// A job can run for an hour: once its child exists, the stored values and the
+// vault key are wiped from the server's memory (the child has its copies and
+// the redactor its own).
+func TestMCPJobDropsTheVaultKeyOnceTheChildRuns(t *testing.T) {
+	w := jobWorld(t)
+	old := runCommand
+	t.Cleanup(func() { runCommand = old })
+	var before, after []byte
+	runCommand = func(_ context.Context, sp runner.Spec) (runner.Result, error) {
+		before = sp.Env["A"].Reveal()
+		sp.OnStart()
+		after = sp.Env["A"].Reveal()
+		return runner.Result{Started: true}, nil
+	}
+	s := w.startMCP()
+	job := s.startJob(10, "true", nil)
+	s.jobStatus(11, job, 5000)
+	s.finish()
+	if string(before) != xv {
+		t.Fatalf("the value was not injected before the start (%d bytes)", len(before))
+	}
+	if len(after) != len(xv) || strings.Trim(string(after), "\x00") != "" {
+		t.Fatalf("the stored value is still in memory after the child started")
+	}
+}

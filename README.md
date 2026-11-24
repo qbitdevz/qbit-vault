@@ -110,6 +110,7 @@ The model sees tool names, secret **names** and redacted results. The value exis
 | `secret_request(name, reason)` | `ok` and a `secret://NAME` reference, after you approved or typed the value in the dialog. Never the value. |
 | `secret_exec(command, secrets)` | Redacted stdout and stderr plus the exit code. |
 | `secret_manage(action, name, ...)` | Proposes remove, edit, move or replace. You confirm outside the chat; the agent gets `ok`. |
+| `secret_exec_start(command, secrets)`, `secret_exec_status(job, wait_ms)`, `secret_exec_stop(job)` | For a command that takes longer than the host allows one tool call (often 60 s): start it in the background, read its redacted output and exit code in steps, stop it. It lives in the MCP server's memory and ends with it. |
 
 The wire contract: [contracts/secrets-broker/v1/CONTRACT.md](contracts/secrets-broker/v1/CONTRACT.md). Components and data flows: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

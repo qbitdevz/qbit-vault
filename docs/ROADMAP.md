@@ -99,7 +99,7 @@ Deferred (nothing here is promised for a date):
 | Item | Why |
 | --- | --- |
 | Capture inside the terminal | an extension cannot answer an MCP tool call (`tool_call` only blocks or mutates), so agent captures stay in the native dialog; the owner deferred a masked in-terminal input |
-| Extension-registered tools and the `policy` in the system prompt | MCP already provides the four tools |
+| Extension-registered tools and the `policy` in the system prompt | MCP already provides the tools |
 | Bash override with reference and binding scan, `--stream` plumbing | agents use `secret_exec` |
 | `/vault mv`, `/vault edit`, fullscreen views | not needed for v1 |
 | Sidebar entry | no Gentle Shell extension entry point found; the footer status is the indicator |

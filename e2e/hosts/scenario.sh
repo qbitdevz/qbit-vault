@@ -306,7 +306,8 @@ for n in 1 2 3 4 5 6 7; do sed -n "${n}p" "$WORK/o" >"$WORK/l$n"; done
 refused() { jq -e --arg t "$1" '.result.isError == true and ((.result.content[0].text | fromjson) | .ok == false and .refusal.type == $t)' "$2" >/dev/null 2>&1 && echo true || echo false; }
 
 # 1. tools/list
-jqt "1. tools/list returns exactly the four tools (no grant tool)" "$WORK/l1" '[.result.tools[].name] | sort == ["secret_exec","secret_list","secret_manage","secret_request"]'
+jqt "1. tools/list returns exactly the seven tools (no grant tool)" "$WORK/l1" '[.result.tools[].name] | sort == ["secret_exec","secret_exec_start","secret_exec_status","secret_exec_stop","secret_list","secret_manage","secret_request"]'
+jqt "1. the job tools say when to prefer a job over secret_exec" "$WORK/l1" '.result.tools[] | select(.name == "secret_exec_start") | .description | contains("more than about 30 seconds")'
 jqt "1. the secret_exec description tells agents to write \${#NAME}" "$WORK/l1" '.result.tools[] | select(.name == "secret_exec") | .description | contains("${#NAME}")'
 # 2. secret_list
 jqt "2. secret_list shows $TOKEN_NAME by name" "$WORK/l2" '.result.isError != true and ((.result.content[0].text | fromjson) | .ok == true and ([.secrets[].name] | index("QBIT_TEST_TOKEN")) != null)'

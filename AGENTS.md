@@ -45,8 +45,8 @@ qbit-vault/                     (module github.com/qbitdevz/qbit-vault)
 │   │                           (copy of defaults/release-key.pub, kept equal by a test)
 │   ├── prompt/                 out-of-band capture: tty, osascript, powershell, zenity, kdialog
 │   │                           (scripted backend only in -tags e2eprompt builds)
-│   ├── broker/                 contract v1 handlers (request/list/exec/manage/grant/revoke)
-│   ├── mcp/                    stdio MCP server exposing the broker
+│   ├── broker/                 contract v1 handlers (request/list/exec/manage/grant/revoke; exec_start/status/stop for a backend that serves jobs)
+│   ├── mcp/                    stdio MCP server exposing the broker (seven tools) and the in-memory job registry (jobs.go)
 │   ├── conformance/            contract schema validation (tests only)
 │   ├── hook/                   Claude Code hooks: pre-bash, post-bash, post-read, user-prompt
 │   ├── hosts/                  Adapter interface, step runner, receipts; adapters in
