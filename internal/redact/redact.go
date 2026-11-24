@@ -353,7 +353,7 @@ func (w *StreamWriter) Write(p []byte) (int, error) {
 	rest := copy(w.buf, w.buf[consumed:])
 	clear(w.buf[rest:])
 	w.buf = w.buf[:rest]
-	if err := w.emit(); err != nil {
+	if err := w.emit(n); err != nil {
 		return 0, err
 	}
 	return len(p), nil
@@ -373,7 +373,7 @@ func (w *StreamWriter) Close() error {
 			var n int
 			w.out, _, n = s.scan(w.buf, true, w.out[:0])
 			w.count += n
-			flushErr = w.emit()
+			flushErr = w.emit(n)
 		}
 	} else {
 		flushErr = w.err
@@ -390,12 +390,29 @@ func (w *StreamWriter) state() *state {
 	return w.r.s
 }
 
-// emit writes the pending output to dst.
-func (w *StreamWriter) emit() error {
+// CountedWriter is a destination that wants the number of replacements the
+// bytes it is handed hold, as they are handed over (a job that reports
+// `redactions` per status call). A StreamWriter whose destination implements
+// it calls WriteCounted instead of Write; the counts of all calls add up to
+// Count.
+type CountedWriter interface {
+	io.Writer
+	WriteCounted(p []byte, replaced int) (int, error)
+}
+
+// emit writes the pending output to dst; replaced is the number of
+// replacements made in the scan that produced it.
+func (w *StreamWriter) emit(replaced int) error {
 	if len(w.out) == 0 {
 		return nil
 	}
-	n, err := w.dst.Write(w.out)
+	var n int
+	var err error
+	if cw, ok := w.dst.(CountedWriter); ok {
+		n, err = cw.WriteCounted(w.out, replaced)
+	} else {
+		n, err = w.dst.Write(w.out)
+	}
 	if err == nil && n < len(w.out) {
 		err = io.ErrShortWrite
 	}
