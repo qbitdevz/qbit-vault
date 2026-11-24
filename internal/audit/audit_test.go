@@ -589,8 +589,11 @@ func TestUnknownEvent(t *testing.T) {
 	if !ValidEvent(EventUnlock) || EventUnlock != "unlock" {
 		t.Error("unlock is not valid")
 	}
-	if len(events) != 20 {
-		t.Fatalf("%d events, want 20", len(events))
+	if !ValidEvent(EventCheck) || EventCheck != "check" {
+		t.Error("check is not valid")
+	}
+	if len(events) != 21 {
+		t.Fatalf("%d events, want 21", len(events))
 	}
 }
 

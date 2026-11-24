@@ -179,6 +179,9 @@ func (r *Jobs) List(ctx context.Context, e broker.Envelope) (broker.ListResult, 
 func (r *Jobs) Exec(ctx context.Context, e broker.Envelope, x broker.ExecRequest) (broker.ExecResponse, error) {
 	return r.inner.Exec(ctx, e, x)
 }
+func (r *Jobs) Check(ctx context.Context, e broker.Envelope, x broker.CheckRequest) (broker.CheckResponse, error) {
+	return r.inner.Check(ctx, e, x)
+}
 func (r *Jobs) Grant(ctx context.Context, e broker.Envelope, x broker.GrantRequest) (broker.GrantResponse, error) {
 	return r.inner.Grant(ctx, e, x)
 }

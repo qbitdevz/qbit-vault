@@ -12,6 +12,7 @@ var localeOps = map[string]string{
 	"list":    ``,
 	"exec":    `"command":"x","secrets":[{"name":"A"}]`,
 	"manage":  `"action":"remove","name":"A","layer":"global","reason":"three word reason"`,
+	"check":   `"names":["A"]`,
 }
 
 func withLocale(extra, locale string) string {

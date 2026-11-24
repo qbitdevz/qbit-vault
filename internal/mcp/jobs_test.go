@@ -157,7 +157,7 @@ func refusalOf(m map[string]any) map[string]any {
 	return r
 }
 
-func TestSevenToolsWithTheirContractDescriptions(t *testing.T) {
+func TestEightToolsWithTheirContractDescriptions(t *testing.T) {
 	cs, _ := connectJobs(t, &starter{})
 	res, err := cs.ListTools(context.Background(), nil)
 	if err != nil {
@@ -170,13 +170,13 @@ func TestSevenToolsWithTheirContractDescriptions(t *testing.T) {
 			t.Errorf("%s description drifted", tool.Name)
 		}
 	}
-	for _, want := range []string{"secret_request", "secret_list", "secret_exec", "secret_manage", "secret_exec_start", "secret_exec_status", "secret_exec_stop"} {
+	for _, want := range []string{"secret_request", "secret_list", "secret_exec", "secret_manage", "secret_exec_start", "secret_exec_status", "secret_exec_stop", "secret_check"} {
 		if !got[want] {
 			t.Errorf("tools/list has no %s", want)
 		}
 	}
-	if len(got) != 7 {
-		t.Errorf("tools = %v, want exactly seven", got)
+	if len(got) != 8 {
+		t.Errorf("tools = %v, want exactly eight", got)
 	}
 }
 

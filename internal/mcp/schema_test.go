@@ -81,7 +81,7 @@ func TestToolSchemasCarryTheWireContractBounds(t *testing.T) {
 	tools := toolInputSchemas(t)
 	checked := 0
 	for tool, op := range map[string]string{"secret_request": "request", "secret_list": "list", "secret_exec": "exec", "secret_manage": "manage",
-		"secret_exec_start": "exec_start", "secret_exec_status": "exec_status", "secret_exec_stop": "exec_stop"} {
+		"secret_exec_start": "exec_start", "secret_exec_status": "exec_status", "secret_exec_stop": "exec_stop", "secret_check": "check"} {
 		props, _ := tools[tool]["properties"].(map[string]any)
 		for name, w := range wireRequestProperties(t, op) {
 			if name == "op" {
@@ -140,5 +140,33 @@ func TestRequestStillAcceptsANullFieldsList(t *testing.T) {
 	m, _ := callJSON(t, cs, "secret_request", map[string]any{"name": "GITHUB_TOKEN", "fields": nil, "reason": "push the release tag to GitHub"})
 	if r, _ := m["refusal"].(map[string]any); r == nil || r["type"] != "user_declined" {
 		t.Errorf("the call did not reach the backend: %v", m)
+	}
+}
+
+// secret_check advertises one to sixteen names, never null, as the wire
+// contract states them; the names themselves stay with the broker so that a
+// bad one gets the typed invalid_name refusal.
+func TestCheckSchemaRequiresOneToSixteenNames(t *testing.T) {
+	list := toolInputSchemas(t)["secret_check"]["properties"].(map[string]any)["names"].(map[string]any)
+	if list["type"] != "array" || list["minItems"] != float64(1) || list["maxItems"] != float64(16) {
+		t.Fatalf("names = %v", list)
+	}
+	req, _ := toolInputSchemas(t)["secret_check"]["required"].([]any)
+	if len(req) != 1 || req[0] != "names" {
+		t.Fatalf("required = %v", req)
+	}
+}
+
+func TestCheckWithoutNamesStopsAtTheToolBoundary(t *testing.T) {
+	f := &fake{}
+	cs := connect(t, f)
+	for _, list := range []any{nil, []any{}, make([]any, 17)} {
+		res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "secret_check", Arguments: map[string]any{"names": list}})
+		if err == nil && !res.IsError {
+			t.Errorf("names=%v was accepted", list)
+		}
+	}
+	if f.check.Names != nil {
+		t.Fatalf("the backend was reached: %v", f.check)
 	}
 }

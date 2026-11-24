@@ -43,6 +43,8 @@ const (
 	// DialogLocale is the capability row for the optional `locale` field of
 	// request, list, exec and manage (CONTRACT.md § Dialog language).
 	DialogLocale = 1
+	// SecretCheck is the capability row for the `check` op (CONTRACT.md § check).
+	SecretCheck = 1
 	// MaxRequestBytes bounds one request.
 	MaxRequestBytes = 64 << 10
 
@@ -81,12 +83,12 @@ const (
 )
 
 var (
-	ops = []string{"request", "list", "exec", "manage", "grant", "revoke", "capabilities"}
+	ops = []string{"request", "list", "exec", "manage", "check", "grant", "revoke", "capabilities"}
 	// jobOps are accepted only by a backend that implements JobBackend; they
 	// are not in `ops`, which lists what every transport serves.
 	jobOps    = []string{"exec_start", "exec_status", "exec_stop"}
 	jobIDRE   = regexp.MustCompile(`^[0-9a-f]{32}$`)
-	opFields  = map[string][]string{"exec_start": {"command", "secrets", "timeout_ms", "shell", "locale"}, "exec_status": {"job", "wait_ms"}, "exec_stop": {"job"}, "request": {"name", "fields", "reason", "suggested_scope", "suggested_layer", "locale"}, "list": {"locale"}, "exec": {"command", "secrets", "timeout_ms", "shell", "locale"}, "manage": {"action", "name", "layer", "reason", "to", "changes", "locale"}, "grant": {"name", "layer", "scope", "ttl_ms", "prompt_token"}, "revoke": {"name", "all", "session_only"}, "capabilities": nil}
+	opFields  = map[string][]string{"exec_start": {"command", "secrets", "timeout_ms", "shell", "locale"}, "exec_status": {"job", "wait_ms"}, "exec_stop": {"job"}, "request": {"name", "fields", "reason", "suggested_scope", "suggested_layer", "locale"}, "list": {"locale"}, "check": {"names", "locale"}, "exec": {"command", "secrets", "timeout_ms", "shell", "locale"}, "manage": {"action", "name", "layer", "reason", "to", "changes", "locale"}, "grant": {"name", "layer", "scope", "ttl_ms", "prompt_token"}, "revoke": {"name", "all", "session_only"}, "capabilities": nil}
 	envFields = []string{"contract", "op", "v", "session", "cwd", "host"}
 	sessionRE = regexp.MustCompile(`^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$`)
 	nameRE    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
@@ -198,6 +200,25 @@ func dispatch(ctx context.Context, e Envelope, m fields, b Backend, t Transport)
 			return nil, err
 		}
 		return b.Exec(ctx, e, r)
+	case "check":
+		r, err := checkRequest(m)
+		if err != nil {
+			return nil, err
+		}
+		res, err := b.Check(ctx, e, r)
+		if err != nil {
+			return nil, err
+		}
+		if res.Results == nil {
+			res.Results = []CheckResult{}
+		}
+		for i := range res.Results {
+			if res.Results[i].SameAs == nil {
+				res.Results[i].SameAs = []string{}
+			}
+		}
+		res.OK = true
+		return res, nil
 	case "exec_start":
 		r, err := execRequest(m)
 		if err != nil {
@@ -304,6 +325,7 @@ func capabilities(info Info) any {
 		Sync           bool     `json:"sync"`
 		RefusalHints   int      `json:"refusal_hints"`
 		DialogLocale   int      `json:"dialog_locale"`
+		SecretCheck    int      `json:"secret_check"`
 		ExecJobs       int      `json:"exec_jobs,omitempty"`
 	}
 	pb := info.PromptBackends
@@ -311,7 +333,7 @@ func capabilities(info Info) any {
 		pb = []string{}
 	}
 	c := caps{OK: true, Contract: Contract, Capabilities: Capabilities, Ops: ops, Layers: layers,
-		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints, DialogLocale: DialogLocale}
+		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints, DialogLocale: DialogLocale, SecretCheck: SecretCheck}
 	if info.ExecJobs {
 		c.ExecJobs = ExecJobs
 	}
@@ -349,6 +371,28 @@ func execRequest(m fields) (ExecRequest, error) {
 		if str(m, "shell", &r.Shell) != nil || !in(r.Shell, shells) {
 			return r, invalid("shell")
 		}
+	}
+	return r, nil
+}
+
+// checkRequest validates `check`: the names are exec's (1 to MaxExecSecrets,
+// each valid, none twice), with no `from` and no other input: the request
+// carries no place for a value.
+func checkRequest(m fields) (CheckRequest, error) {
+	var r CheckRequest
+	raw, ok := m["names"]
+	if !ok || strict(raw, &r.Names) != nil || len(r.Names) == 0 || len(r.Names) > MaxExecSecrets {
+		return r, invalid("names")
+	}
+	seen := map[string]bool{}
+	for _, n := range r.Names {
+		if !nameRE.MatchString(n) {
+			return r, refusal.New(refusal.InvalidName, "")
+		}
+		if seen[n] {
+			return r, invalid("names")
+		}
+		seen[n] = true
 	}
 	return r, nil
 }

@@ -290,7 +290,7 @@ func TestSkillAsksForTheConversationLanguage(t *testing.T) {
 	for _, want := range []string{
 		"## Dialog language",
 		"Always send `locale`",
-		"`secret_request`, `secret_list`, `secret_exec`, `secret_exec_start` and `secret_manage`",
+		"`secret_request`, `secret_list`, `secret_exec`, `secret_exec_start`, `secret_manage` and `secret_check`",
 		"BCP 47",
 		"`es-ES`",
 		"write the `reason` in that same language",

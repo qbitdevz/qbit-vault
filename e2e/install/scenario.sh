@@ -234,7 +234,7 @@ cp "$WORK/o" "$WORK/mcp.out"
 for n in 1 2 3 4 5 6 7; do sed -n "${n}p" "$WORK/mcp.out" >"$WORK/l$n"; done
 refused() { jq -e --arg t "$1" '.result.isError == true and ((.result.content[0].text | fromjson) | .ok == false and .refusal.type == $t)' "$2" >/dev/null 2>&1 && echo true || echo false; }
 
-jqt "6.1 tools/list returns exactly the seven tools" "$WORK/l1" '[.result.tools[].name] | sort == ["secret_exec","secret_exec_start","secret_exec_status","secret_exec_stop","secret_list","secret_manage","secret_request"]'
+jqt "6.1 tools/list returns exactly the eight tools" "$WORK/l1" '[.result.tools[].name] | sort == ["secret_check","secret_exec","secret_exec_start","secret_exec_status","secret_exec_stop","secret_list","secret_manage","secret_request"]'
 jqt "6.2 secret_list shows $SECRET_NAME by name, no value field" "$WORK/l2" ".result.isError != true and ((.result.content[0].text | fromjson) | .ok == true and ([.secrets[].name] | index(\"$SECRET_NAME\")) != null and ([.secrets[] | keys | index(\"value\")] | all(. == null)))"
 expect_eq "6.3 secret_exec without a grant is refused grant_required" "$(refused grant_required "$WORK/l3")" true
 jqt "6.4 secret_request is approved by the scripted prompt (scope once)" "$WORK/l4" ".result.isError != true and ((.result.content[0].text | fromjson) | .ok == true and .grant.scope == \"once\" and .ref == \"secret://$SECRET_NAME\")"

@@ -17,8 +17,9 @@ import (
 )
 
 type fake struct {
-	env  broker.Envelope
-	exec broker.ExecRequest
+	env   broker.Envelope
+	exec  broker.ExecRequest
+	check broker.CheckRequest
 }
 
 func (f *fake) List(_ context.Context, e broker.Envelope) (broker.ListResult, error) {
@@ -28,6 +29,10 @@ func (f *fake) List(_ context.Context, e broker.Envelope) (broker.ListResult, er
 func (f *fake) Exec(_ context.Context, e broker.Envelope, r broker.ExecRequest) (broker.ExecResponse, error) {
 	f.env, f.exec = e, r
 	return broker.ExecResponse{OK: true, ExitCode: 0, Stdout: "[REDACTED:A]"}, nil
+}
+func (f *fake) Check(_ context.Context, e broker.Envelope, r broker.CheckRequest) (broker.CheckResponse, error) {
+	f.env, f.check = e, r
+	return broker.CheckResponse{OK: true, Results: []broker.CheckResult{{Name: r.Names[0], Layer: "global", Length: 4, LooksLike: "text", SameAs: []string{}}}}, nil
 }
 func (f *fake) Grant(context.Context, broker.Envelope, broker.GrantRequest) (broker.GrantResponse, error) {
 	panic("grant must never reach the backend over MCP")
@@ -79,7 +84,7 @@ func callJSON(t *testing.T, cs *sdk.ClientSession, tool string, args map[string]
 	return m, res.IsError
 }
 
-func TestSevenToolsWithNormativeDescriptions(t *testing.T) {
+func TestEightToolsWithNormativeDescriptions(t *testing.T) {
 	cs := connect(t, &fake{})
 	res, err := cs.ListTools(context.Background(), nil)
 	if err != nil {
@@ -93,7 +98,7 @@ func TestSevenToolsWithNormativeDescriptions(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if strings.Join(names, ",") != "secret_exec,secret_exec_start,secret_exec_status,secret_exec_stop,secret_list,secret_manage,secret_request" {
+	if strings.Join(names, ",") != "secret_check,secret_exec,secret_exec_start,secret_exec_status,secret_exec_stop,secret_list,secret_manage,secret_request" {
 		t.Fatalf("tools=%v", names)
 	}
 	if got := cs.InitializeResult().Instructions; got != broker.Instructions() {
@@ -112,7 +117,7 @@ func TestDescriptionsMatchContract(t *testing.T) {
 			t.Errorf("%s description is not CONTRACT.md's", name)
 		}
 	}
-	if len(ToolDescriptions) != 7 {
+	if len(ToolDescriptions) != 8 {
 		t.Fatalf("%d descriptions", len(ToolDescriptions))
 	}
 }
@@ -223,5 +228,25 @@ func TestNewSession(t *testing.T) {
 	a, b := NewSession(), NewSession()
 	if a == b || !strings.HasPrefix(a, "mcp:") || len(a) != len("mcp:")+16 {
 		t.Fatalf("%q %q", a, b)
+	}
+}
+
+// secret_check reaches the backend as the check op with its names, and answers
+// what the backend decided; a refusal is an error result.
+func TestSecretCheckIsTheCheckOp(t *testing.T) {
+	f := &fake{}
+	cs := connect(t, f)
+	m, isErr := callJSON(t, cs, "secret_check", map[string]any{"names": []any{"A", "B"}, "locale": "es"})
+	if isErr || m["ok"] != true || f.env.Op != "check" || f.env.Locale != "es" || strings.Join(f.check.Names, ",") != "A,B" {
+		t.Fatalf("m=%v env=%+v check=%+v", m, f.env, f.check)
+	}
+	res := m["results"].([]any)[0].(map[string]any)
+	if res["name"] != "A" || res["same_as"] == nil {
+		t.Fatalf("result = %v", res)
+	}
+	// A name that is not valid is the broker's typed refusal, not the tool's.
+	m, isErr = callJSON(t, cs, "secret_check", map[string]any{"names": []any{"bad"}})
+	if !isErr || refusalOf(m)["type"] != "invalid_name" {
+		t.Fatalf("m=%v", m)
 	}
 }

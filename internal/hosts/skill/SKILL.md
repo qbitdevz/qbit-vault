@@ -24,18 +24,19 @@ qbit-vault is the user's local secrets broker. You can run commands that need a 
 
 ## Dialog language
 
-The user answers qbit-vault's dialogs in their own language. Always send `locale` with every `secret_request`, `secret_list`, `secret_exec`, `secret_exec_start` and `secret_manage` call: the BCP 47 tag of the language you are speaking with the user in (`es-ES`, `en-GB`; a plain `es` or `en` is fine). qbit-vault writes every dialog itself, in English or Spanish, from its own texts: you choose only the language and never supply dialog text. Also write the `reason` in that same language, because the user reads it word for word in the dialog and it is never translated.
+The user answers qbit-vault's dialogs in their own language. Always send `locale` with every `secret_request`, `secret_list`, `secret_exec`, `secret_exec_start`, `secret_manage` and `secret_check` call: the BCP 47 tag of the language you are speaking with the user in (`es-ES`, `en-GB`; a plain `es` or `en` is fine). qbit-vault writes every dialog itself, in English or Spanish, from its own texts: you choose only the language and never supply dialog text. Also write the `reason` in that same language, because the user reads it word for word in the dialog and it is never translated.
 
 Secret names, scopes (`once`, `session`, `project`), layers (`global`, `project`), host names and paths stay exactly as they are in every language, so what the user approves is what you and the audit log name. A `locale` qbit-vault does not know is ignored, never an error: send your best tag.
 
 ## When a service rejects the credential
 
-An `exec` that runs but gets `401`, `403`, "invalid token" or "authentication failed" back means the stored value is wrong for that service, not that qbit-vault failed. Do not loop:
+An `exec` that runs but gets `401`, `403`, "invalid token" or "authentication failed" back means a stored value is wrong for that service, not that qbit-vault failed. Do not loop, and do not replace a secret on a guess:
 
-1. Check presence only: `${#NAME}` prints the length. Never print, echo, dump, encode or hash the value to inspect it (that is refused as `dump_command`, and it would leak it).
-2. Tell the user what the service expects, as precisely as you can: the credential type (for Cloudflare an API Token, not the Global API Key), the scopes or permissions, the account or zone.
-3. Propose **one** `secret_manage` replace with that in the reason. qbit-vault points out pasted quotes or invisible characters before saving, which is a common cause.
-4. If the new value is rejected too, stop and report what the service answered; do not ask again.
+1. Call `secret_check` with every secret the failed call used: the password or token, and also the identifier fields (an email, a username, a host, an account id), because the wrong one is often not the password. It returns no value and no part of one: for each name its `length`, whether it is `empty`, has padding `whitespace` (a trailing newline included) or is `multiline`, whether it is a `placeholder` (`change-me`, `TODO`, `xxx`...), what it `looks_like` (`email`, `url`, `jwt`, `pem`, `uuid`, `hex`, `base64`, `number` or `text`; a guess from the shape only) and `same_as`, the other names of that call that hold an identical value. It needs a usable grant for each name (a refusal names the one that lacks it: ask for it with `secret_request`) and it does not spend a `once` grant, so the next `secret_exec` still runs. Never print, echo, dump, encode or hash a value to inspect it: that is refused as `dump_command` and would leak it.
+2. Tell the user in plain words what the check shows, for example "LOGIN_EMAIL does not look like an email and holds the same value as LOGIN_PASSWORD", or "API_TOKEN ends with a newline". When it shows nothing wrong, say that too: the value may be well formed and still not be the credential the service wants.
+3. Tell the user what the service expects, as precisely as you can: the credential type (for Cloudflare an API Token, not the Global API Key), the scopes or permissions, the account or zone.
+4. Only then, and only for the secret the evidence points to, propose **one** `secret_manage` replace with that evidence in the reason. Do not propose a replace for a secret the check shows nothing wrong with unless the user says it is the wrong one. qbit-vault points out pasted quotes or invisible characters before saving, which is a common cause; always call `secret_check` before you propose a `secret_manage` replace after a rejection.
+5. If the new value is rejected too, stop and report what the service answered; do not ask again.
 
 ## Long commands
 
@@ -61,7 +62,7 @@ The host runs qbit-vault over what your built-in tools return and over the files
 ## Rules
 
 - Never print, echo, copy, encode or write a secret value, and never ask the user to paste one into the chat.
-- Never print the environment (`env`, `printenv`, `set`, `/proc/*/environ`) while secrets are injected: it is refused. To check that a value is present use its length only: `${#NAME}`.
+- Never print the environment (`env`, `printenv`, `set`, `/proc/*/environ`) while secrets are injected: it is refused. To check that a value is present or what it looks like, use `secret_check`; for a length alone `${#NAME}` also works.
 - You cannot grant access and you cannot use another project's secrets; only the user grants, in the dialog.
 - Ask only for what the current task needs.
 
@@ -71,7 +72,7 @@ Every refusal carries a `hint`: fixed text saying what to do next. Follow it. A 
 
 | Refusal | What to do |
 | --- | --- |
-| `grant_required` | Call `secret_request` for that name (the user approves it), then retry `secret_exec` once. The message may say the grant is for another directory or an earlier value: the same answer, and run the command from the directory the grant was approved in if you can. |
+| `grant_required` | Call `secret_request` for that name (the user approves it), then retry `secret_exec` (or `secret_check`) once. The message may say the grant is for another directory or an earlier value: the same answer, and run the command from the directory the grant was approved in if you can. |
 | `unknown_secret` | The name does not exist here: call `secret_request` so the user can store it. |
 | `user_declined` | Stop asking for it; tell the user what could not be done. Do not re-ask during the cooldown. |
 | `reason_too_vague` | Rephrase the reason: what command, what for. |

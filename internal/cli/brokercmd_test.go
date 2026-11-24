@@ -42,7 +42,7 @@ func refusalType(m map[string]any) string {
 func TestBrokerCapabilities(t *testing.T) {
 	w := newWorld(t)
 	code, _, out := w.broker("capabilities", envelope("capabilities", w.outside, ""))
-	want := `{"ok":true,"contract":"qbit-vault.secrets-broker/v1","capabilities":"1.1","ops":["request","list","exec","manage","grant","revoke","capabilities"],"layers":["global","project"],"prompt_backends":[],"field_kinds":["secret","text"],"max_fields":8,"keychain":"` + osMode() + `","streaming":true,"sync":false,"refusal_hints":1,"dialog_locale":1}` + "\n"
+	want := `{"ok":true,"contract":"qbit-vault.secrets-broker/v1","capabilities":"1.1","ops":["request","list","exec","manage","check","grant","revoke","capabilities"],"layers":["global","project"],"prompt_backends":[],"field_kinds":["secret","text"],"max_fields":8,"keychain":"` + osMode() + `","streaming":true,"sync":false,"refusal_hints":1,"dialog_locale":1,"secret_check":1}` + "\n"
 	if code != exitcode.OK || out != want {
 		t.Fatalf("code=%d\n got %s\nwant %s", code, out, want)
 	}

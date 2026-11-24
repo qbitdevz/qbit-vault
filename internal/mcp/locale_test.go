@@ -13,6 +13,7 @@ var localeCalls = map[string]map[string]any{
 	"secret_request": {"name": "GITHUB_TOKEN", "reason": "push the release tag to GitHub"},
 	"secret_list":    {},
 	"secret_exec":    {"command": "true", "secrets": []any{map[string]any{"name": "A"}}},
+	"secret_check":   {"names": []any{"A"}},
 	"secret_manage":  {"action": "remove", "name": "A", "layer": "global", "reason": "this key was rotated away"},
 }
 

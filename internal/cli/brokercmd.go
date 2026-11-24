@@ -18,6 +18,7 @@ import (
 	"github.com/qbitdevz/qbit-vault/internal/keychain"
 	"github.com/qbitdevz/qbit-vault/internal/refusal"
 	"github.com/qbitdevz/qbit-vault/internal/runner"
+	"github.com/qbitdevz/qbit-vault/internal/secret"
 	"github.com/qbitdevz/qbit-vault/internal/vault"
 )
 
@@ -238,7 +239,18 @@ func (b *cliBackend) execSetup(ctx context.Context, e broker.Envelope, r broker.
 	if err := runner.CheckShell(p.shell); err != nil {
 		return nil, p, refusal.New(refusal.Internal, "").WithMessage("shell not available on this system")
 	}
-	dir, err := filepath.EvalSymlinks(e.Cwd)
+	dir, err := callDir(e.Cwd)
+	if err != nil {
+		return nil, p, err
+	}
+	p.dir = dir
+	return g, p, nil
+}
+
+// callDir is the canonical working directory of a call that reads stored
+// values from it (exec, jobs and check): symlinks resolved, and a directory.
+func callDir(cwd string) (string, error) {
+	dir, err := filepath.EvalSymlinks(cwd)
 	if err == nil {
 		var fi os.FileInfo
 		if fi, err = os.Stat(dir); err == nil && !fi.IsDir() {
@@ -246,10 +258,86 @@ func (b *cliBackend) execSetup(ctx context.Context, e broker.Envelope, r broker.
 		}
 	}
 	if err != nil {
-		return nil, p, refusal.New(refusal.Internal, "").WithMessage("invalid request: cwd")
+		return "", refusal.New(refusal.Internal, "").WithMessage("invalid request: cwd")
 	}
-	p.dir = dir
-	return g, p, nil
+	return dir, nil
+}
+
+// Check is the contract's `check` (CONTRACT.md § check): the values exec
+// would inject from this directory, described by what they look like, never
+// by what they are. Nothing is consumed or written but the audit record.
+func (b *cliBackend) Check(ctx context.Context, e broker.Envelope, r broker.CheckRequest) (broker.CheckResponse, error) {
+	g := b.hot(e)
+	g.ctx = ctx
+	g.unlock.lockOnCancel = true
+	g.unlock.names = r.Names
+	dir, err := callDir(e.Cwd)
+	if err != nil {
+		return broker.CheckResponse{}, err
+	}
+	s, err := g.openSession()
+	if err != nil {
+		return broker.CheckResponse{}, asRefusal(g.lockedHint(err))
+	}
+	defer s.close()
+
+	// 1. Resolve every name from the directory, as exec does.
+	var recs []vault.Entry
+	defer func() { wipeEntries(recs) }()
+	for _, name := range r.Names {
+		en, err := findEntry(s, name, layerFlags{}, dir)
+		if err != nil {
+			return broker.CheckResponse{}, asRefusal(err)
+		}
+		recs = append(recs, en)
+	}
+
+	// 2. The grants exec would accept, without consuming or writing anything:
+	// grants.Lookup is the predicate of grants.Check that `list` shows.
+	grantCwd, err := grantCwdOf(dir)
+	if err != nil {
+		return broker.CheckResponse{}, asRefusal(mapErr(err, ""))
+	}
+	var st *grants.Store
+	if _, err := s.v.ReadGrants(func(body []byte) error {
+		var derr error
+		st, derr = grants.Decode(body)
+		return derr
+	}); err != nil {
+		return broker.CheckResponse{}, asRefusal(mapErr(err, ""))
+	}
+	now := clock()
+	for _, en := range recs {
+		gr, why := grants.Lookup(st, en.Name, en.Layer.Key(), en.Record.ID, en.Record.Sensitive, g.Session, grantCwd, now)
+		if gr == nil {
+			return broker.CheckResponse{}, grantRefusal(en.Name, why, g.Session)
+		}
+	}
+
+	// 3. One audit record per call, before anything is described: a check
+	// that cannot be recorded describes nothing.
+	rec := audit.Record{Event: audit.EventCheck, Session: g.Session, By: "agent", Names: r.Names, Layer: sharedLayer(recs)}
+	if err := audit.Append(g.Home(), rec); err != nil {
+		return broker.CheckResponse{}, refusal.New(refusal.Internal, "")
+	}
+
+	// 4. Describe. Values are only compared with each other here, all of them
+	// granted above, in constant time.
+	res := broker.CheckResponse{OK: true}
+	for i, en := range recs {
+		sh := secret.Inspect(en.Record.Value)
+		cr := broker.CheckResult{
+			Name: en.Name, Layer: layerName(en.Layer), Length: sh.Length, Empty: sh.Empty, Whitespace: sh.Whitespace,
+			Multiline: sh.Multiline, Placeholder: sh.Placeholder, LooksLike: sh.LooksLike, SameAs: []string{},
+		}
+		for j, other := range recs {
+			if i != j && secret.Equal(en.Record.Value, other.Record.Value) {
+				cr.SameAs = append(cr.SameAs, other.Name)
+			}
+		}
+		res.Results = append(res.Results, cr)
+	}
+	return res, nil
 }
 
 func (b *cliBackend) Exec(ctx context.Context, e broker.Envelope, r broker.ExecRequest) (broker.ExecResponse, error) {

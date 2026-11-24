@@ -15,7 +15,7 @@ Every request and response carries:
 | Field | Req | Description |
 | --- | --- | --- |
 | `contract` | yes | Literal `qbit-vault.secrets-broker/v1` |
-| `op` | yes | One of `request`, `list`, `exec`, `manage`, `grant`, `revoke`, `capabilities`; the MCP server also serves `exec_start`, `exec_status` and `exec_stop` (§ Jobs) |
+| `op` | yes | One of `request`, `list`, `exec`, `manage`, `check`, `grant`, `revoke`, `capabilities`; the MCP server also serves `exec_start`, `exec_status` and `exec_stop` (§ Jobs) |
 | `v` | yes | Operation schema version, integer, currently `1` for all ops |
 | `session` | yes | Opaque host session id, `^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$` (prefix = host: `pi`, `claude`, `codex`, `cli`; the MCP server generates `mcp`) |
 | `cwd` | yes | Absolute path of the working directory; used to resolve the repository root for the project layer and the `project` scope. A linked Git worktree resolves to the root of its main clone, when the worktree and the clone name each other |
@@ -214,6 +214,60 @@ Response:
 
 `layer` is the record's layer after the action (`null` after `remove`).
 
+### `check` — describe values without returning them (model-callable)
+
+Answers "why does the service reject this credential?" without a value ever reaching the model: for each named secret it returns counts, booleans and one word of a closed set, and which of the other names of the same call hold the same value.
+
+Request:
+```json
+{ "op": "check", "names": ["LOGIN_EMAIL", "LOGIN_PASSWORD"], "locale": "es-ES" }
+```
+
+| Field | Req | Rules |
+| --- | --- | --- |
+| `names` | yes | 1–16 distinct secret names (`^[A-Z][A-Z0-9_]{0,63}$`), each resolved from `cwd` as `exec` does: this project's secret first, else the global one. No `from`, no other input |
+| `locale` | no | BCP 47 tag of the conversation language (`es-ES`); only the unlock dialog can open, see § Dialog language |
+
+Behavior (normative): resolve every name (`unknown_secret` for one that does not resolve) → evaluate the grants of every name with the predicate `exec` and `list` use, **without consuming or writing anything** (an unused `once` grant of this session allows a check and is not spent, so a following `exec` still works; a `sensitive` secret can be checked only while such a `once` grant exists) → only when every name passed, read the values and answer. A name with no applicable grant makes the whole call `grant_required`, naming that secret, with the same message and hint as `exec`; no other name of the call is described. No dialog opens other than the unlock dialog of a locked vault. The call is appended to the audit log as one `check` record (the names, the layer when they share one, the session), never a result field; a refusal is audited like `exec`'s. If that record cannot be written the call is refused as `internal` and nothing is described.
+
+Response:
+```json
+{ "ok": true, "results": [
+  { "name": "LOGIN_EMAIL",    "layer": "global", "length": 11, "empty": false, "whitespace": false,
+    "multiline": false, "placeholder": false, "looks_like": "text", "same_as": ["LOGIN_PASSWORD"] },
+  { "name": "LOGIN_PASSWORD", "layer": "global", "length": 11, "empty": false, "whitespace": false,
+    "multiline": false, "placeholder": false, "looks_like": "text", "same_as": ["LOGIN_EMAIL"] } ] }
+```
+
+`results` has one entry per requested name, in request order. Nothing else is ever returned: no value, no prefix or suffix, no hash or checksum, no entropy, no character classes.
+
+| Field | Meaning |
+| --- | --- |
+| `name`, `layer` | The secret and the layer it resolved to (`global` or `project`) |
+| `length` | Number of characters (Unicode code points, not bytes) |
+| `empty` | The value has no characters |
+| `whitespace` | It starts or ends with a white-space character, a trailing newline included |
+| `multiline` | A line break (LF or CR) remains after leading and trailing white space is removed; a lone trailing newline is `whitespace`, not `multiline` |
+| `placeholder` | The value, trimmed and compared without regard to case, is exactly one of: `change-me`, `changeme`, `todo`, `xxx`, `your-api-key`, `example`, `password`, `secret`, `none`, `null`, `test` (the list is fixed in code, `secret.Placeholders`) |
+| `looks_like` | A guess from the shape only, one word of the closed set below. The stored metadata of a secret declares no format, so a declared kind is never compared |
+| `same_as` | The other names **of this call** whose value is byte-identical (compared in constant time, only between secrets of this call, all of which passed the grant check); `[]` when none. Symmetric |
+
+`looks_like` rules, applied to the value with leading and trailing white space removed, first match wins, `text` is the fallback (a value with white space inside is `text`, except a PEM block):
+
+| Word | Rule |
+| --- | --- |
+| `pem` | Starts with `-----BEGIN <LABEL>-----` and ends with `-----END <LABEL>-----` for the same label (a truncated block is `text`) |
+| `jwt` | Three dot-separated base64url parts; the first two start with `eyJ` (a JSON object), the third may be empty |
+| `uuid` | `8-4-4-4-12` hexadecimal digits |
+| `url` | `scheme://` and a non-empty authority, no white space; credentials embedded in it do not change the word |
+| `email` | One `@`, a local part of the usual characters and a domain of at least two dot-separated labels |
+| `number` | An optionally signed integer or decimal, digits only |
+| `hex` | Hexadecimal digits only, an even count, at least 16 |
+| `base64` | At least 16 characters of the standard alphabet `A-Z a-z 0-9 + /` (the URL-safe `-` and `_` are not recognized), padded with up to two `=` to a multiple of 4 or unpadded with a length that is not 1 more than a multiple of 4, and at least one digit, `=`, `+` or `/` |
+| `text` | Anything else, an empty value included |
+
+What a check discloses to a caller that already holds the grants (THREAT_MODEL R23): the exact length, the shape word, the booleans, and one bit per pair of granted secrets of the call. The caller could compute every one of them inside `exec` with `${#NAME}` and a comparison under the same grants.
+
 ### `grant` — create or widen a grant (**user-UI only, never model-callable**)
 
 Only the host UI (the planned Pi extension prompt, or the native dialog) may send it, and only as the result of a user interaction. The MCP server does not expose it as a tool. The CLI accepts it only from an interactive TTY or with `--from-prompt-token <t>` issued by the broker's own prompt.
@@ -232,22 +286,24 @@ Request: `{ "op": "capabilities" }`
 Response:
 ```json
 { "ok": true, "contract": "qbit-vault.secrets-broker/v1", "capabilities": "1.1",
-  "ops": ["request","list","exec","manage","grant","revoke","capabilities"],
+  "ops": ["request","list","exec","manage","check","grant","revoke","capabilities"],
   "layers": ["global","project"],
   "prompt_backends": ["pi-ui","osascript","powershell","zenity","kdialog","tty"],
   "field_kinds": ["secret","text"], "max_fields": 8,
-  "keychain": "secret-service", "streaming": true, "sync": false, "refusal_hints": 1, "dialog_locale": 1 }
+  "keychain": "secret-service", "streaming": true, "sync": false, "refusal_hints": 1, "dialog_locale": 1, "secret_check": 1 }
 ```
 
 `refusal_hints: 1` is a capability row (additive, same major): the broker puts a `hint` on every refusal (and a `rule` on `dump_command`), see § Refusals. A host that does not find the row must not depend on those fields. The `capabilities` version string is unchanged.
 
 `exec_jobs: 1` is a capability row (additive, same major, issue #64), present only from a backend that serves the job ops of § Jobs, the MCP server: `exec_start`, `exec_status` and `exec_stop` exist there and nowhere else. The `ops` list is unchanged (it names the ops every transport serves).
 
-`dialog_locale: 1` is a capability row (additive, same major, issue #63): `request`, `list`, `exec` and `manage` accept the optional `locale` field below. A host that does not find the row must not send it (an older broker refuses an unknown field). The `capabilities` version string stays `1.1`.
+`secret_check: 1` is a capability row (additive, same major, issue #62): the `check` op above exists. A host that does not find the row must not call it (an older broker answers `invalid request: op`). The `capabilities` version string stays `1.1`.
+
+`dialog_locale: 1` is a capability row (additive, same major, issue #63): `request`, `list`, `exec`, `manage` and `check` accept the optional `locale` field below. A host that does not find the row must not send it (an older broker refuses an unknown field). The `capabilities` version string stays `1.1`.
 
 ## Dialog language
 
-`request`, `list`, `exec` and `manage` take an optional `locale`: a string, the BCP 47 tag of the language of the conversation with the user (`es-ES`, `en-GB`). The agent chooses only the language: every dialog is generated by qbit-vault from its own catalogue (English and Spanish today), and no field of a request, `locale` included, can supply dialog text.
+`request`, `list`, `exec`, `manage` and `check` take an optional `locale`: a string, the BCP 47 tag of the language of the conversation with the user (`es-ES`, `en-GB`). The agent chooses only the language: every dialog is generated by qbit-vault from its own catalogue (English and Spanish today), and no field of a request, `locale` included, can supply dialog text.
 
 - **Resolution.** The request's `locale`, then the environment variable `QBIT_VAULT_LOCALE`, then the system locale (POSIX `LC_ALL`, `LC_MESSAGES`, `LANG`; on Windows the user's first preferred display language), then English. A tag is matched by its primary language subtag, case-insensitive: `es`, `es-AR` and `ES_es.UTF-8` are Spanish.
 - **Fallback.** A string that names no shipped language, is malformed or is longer than 35 characters is ignored and the next step decides; it is never refused, shown, logged, audited or echoed. A value that is not a JSON string is the usual `invalid request: locale`.
@@ -260,8 +316,8 @@ A refusal is `{ "ok": false, "refusal": { "type": "<type>", "name": "<secret nam
 
 | `type` | When | `retryable` | Expected host behavior |
 | --- | --- | --- | --- |
-| `grant_required` | `exec` references a name with no active grant. When a grant exists but does not apply (another directory, or an earlier value) the `message` says so, e.g. `NAME has a project grant for another directory; call secret_request` | yes | Open the grant prompt; retry once |
-| `unknown_secret` | `exec` or `manage` references a name that does not resolve from `cwd` (in neither this project nor global) | yes | Model should call `request` |
+| `grant_required` | `exec` or `check` references a name with no active grant. When a grant exists but does not apply (another directory, or an earlier value) the `message` says so, e.g. `NAME has a project grant for another directory; call secret_request` | yes | Open the grant prompt; retry once |
+| `unknown_secret` | `exec`, `check` or `manage` references a name that does not resolve from `cwd` (in neither this project nor global) | yes | Model should call `request` |
 | `user_declined` | User cancelled the prompt | no (60 s cooldown) | Tell the model the user declined; do not re-ask |
 | `rate_limited` | Re-request inside the cooldown | no | Back off |
 | `reason_too_vague` | `request.reason` fails the heuristic | yes | Model rephrases with a concrete reason |
@@ -350,6 +406,8 @@ These descriptions are shipped verbatim to every host so models see the same con
 **`secret_exec_status`** — "Read a job started with secret_exec_start. Waits up to wait_ms (0 to 50000, default 0) and returns early when the job ends, so pass a wait_ms such as 30000 instead of polling in a loop. Returns state (running, exited, timed_out or stopped), exit_code once it ended, duration_ms, and the redacted stdout and stderr the job produced since your previous call for this job: each output is returned once, so keep what you need. A call that returns a finished state is the last one for that job; an unread result is kept for 10 minutes. Secret values are redacted as in secret_exec."
 
 **`secret_exec_stop`** — "Stop a job started with secret_exec_start: its whole process tree is killed. Returns the same fields as secret_exec_status, with the final state and any output you have not read yet. Stopping a job that already ended returns its final state. Use it for a job that is stuck or that you no longer need."
+
+**`secret_check`** — "Describe the values of named secrets you could use right now, without seeing them: for each, its length, whether it is empty, padded with white space, multi-line or a placeholder such as change-me, what its shape looks like (email, url, jwt, pem, uuid, hex, base64, number or text), and which of the other names in the same call hold the identical value. Call it when a service rejects a credential, with every secret the failed call used, before you propose to replace one. It returns no value and no part of one. A name without a usable grant is refused as in secret_exec, and a once grant is not spent by a check."
 
 **`secret_exec`** — "Run a shell command with named secrets injected as environment variables for that process only. Output is returned with secret values redacted. Commands that print the environment or a secret are refused; to use only a length, write ${#NAME}. Prefer this over asking the user to paste credentials. A refused command carries a rule and a hint saying why and what to do instead; follow the hint, because an unlocked vault or a grant does not lift a refusal."
 

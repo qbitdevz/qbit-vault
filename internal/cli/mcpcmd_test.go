@@ -84,7 +84,7 @@ func TestMCPServeOverStdio(t *testing.T) {
 		t.Fatalf("instructions=%q", instr)
 	}
 	tools := rs[2]["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 7 {
+	if len(tools) != 8 {
 		t.Fatalf("tools=%d", len(tools))
 	}
 	content := rs[3]["result"].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string)

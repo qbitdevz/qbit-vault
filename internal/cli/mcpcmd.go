@@ -24,7 +24,7 @@ func (nopWriteCloser) Close() error { return nil }
 func newMCPCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp",
-		Short: "Serve the seven secret tools over stdio MCP (host plumbing)",
+		Short: "Serve the eight secret tools over stdio MCP (host plumbing)",
 		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			session := g.Session

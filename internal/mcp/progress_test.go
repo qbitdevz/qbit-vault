@@ -46,6 +46,11 @@ func (w *waiting) List(ctx context.Context, e broker.Envelope) (broker.ListResul
 	return w.fake.List(ctx, e)
 }
 
+func (w *waiting) Check(ctx context.Context, e broker.Envelope, r broker.CheckRequest) (broker.CheckResponse, error) {
+	w.wait(ctx)
+	return w.fake.Check(ctx, e, r)
+}
+
 func (w *waiting) Exec(ctx context.Context, e broker.Envelope, r broker.ExecRequest) (broker.ExecResponse, error) {
 	w.wait(ctx)
 	return w.fake.Exec(ctx, e, r)
@@ -152,6 +157,7 @@ func TestProgressWhileListAndExecWait(t *testing.T) {
 		want string
 	}{
 		"secret_list":    {map[string]any{}, "Waiting for the vault to be unlocked."},
+		"secret_check":   {map[string]any{"names": []any{"A"}}, "Waiting for the vault to be unlocked."},
 		"secret_exec":    {map[string]any{"command": "true", "secrets": []any{map[string]any{"name": "A"}}}, "Waiting for the vault to be unlocked or for the command to finish."},
 		"secret_request": {map[string]any{"name": "A", "reason": "create the github release for v1.2.0"}, "Waiting for the user to answer the dialog."},
 	} {

@@ -17,7 +17,7 @@ type Envelope struct {
 	Cwd      string `json:"cwd"`
 	Host     *Host  `json:"host,omitempty"`
 	// Locale is the optional BCP 47 tag of the conversation language that
-	// request, list, exec and manage may carry (CONTRACT.md § Dialog
+	// request, list, exec, manage and check may carry (CONTRACT.md § Dialog
 	// language). It is the caller's raw text: whoever resolves it ignores a
 	// tag that names no language, and nothing ever shows, logs or echoes it.
 	Locale string `json:"-"`
@@ -41,6 +41,12 @@ type ExecRequest struct {
 	Secrets   []ExecSecret
 	TimeoutMS int
 	Shell     string
+}
+
+// CheckRequest is a validated `check`: one to MaxExecSecrets distinct, valid
+// secret names.
+type CheckRequest struct {
+	Names []string
 }
 
 // GrantRequest is a validated `grant`. Layer is "global" or "project".
@@ -184,6 +190,29 @@ type ExecResponse struct {
 	Truncated  bool   `json:"truncated"`
 }
 
+// CheckResult describes one checked secret (CONTRACT.md § check). Every field
+// is a count, a boolean or a word of a closed set, never a value or a part of
+// one. SameAs holds the other names of the same call whose value is
+// byte-identical (never null).
+type CheckResult struct {
+	Name        string   `json:"name"`
+	Layer       string   `json:"layer"`
+	Length      int      `json:"length"`
+	Empty       bool     `json:"empty"`
+	Whitespace  bool     `json:"whitespace"`
+	Multiline   bool     `json:"multiline"`
+	Placeholder bool     `json:"placeholder"`
+	LooksLike   string   `json:"looks_like"`
+	SameAs      []string `json:"same_as"`
+}
+
+// CheckResponse is the `check` success payload, one result per requested
+// name, in request order.
+type CheckResponse struct {
+	OK      bool          `json:"ok"`
+	Results []CheckResult `json:"results"`
+}
+
 // GrantResponse is the `grant` success payload.
 type GrantResponse struct {
 	OK    bool      `json:"ok"`
@@ -325,6 +354,9 @@ type PreparedExec interface {
 type Backend interface {
 	List(ctx context.Context, e Envelope) (ListResult, error)
 	Exec(ctx context.Context, e Envelope, r ExecRequest) (ExecResponse, error)
+	// Check describes the values of secrets the caller could use right now,
+	// without consuming a grant and without returning a value.
+	Check(ctx context.Context, e Envelope, r CheckRequest) (CheckResponse, error)
 	Grant(ctx context.Context, e Envelope, r GrantRequest) (GrantResponse, error)
 	Revoke(ctx context.Context, e Envelope, r RevokeRequest) (RevokeResponse, error)
 	Request(ctx context.Context, e Envelope, r RequestRequest) (RequestResponse, error)

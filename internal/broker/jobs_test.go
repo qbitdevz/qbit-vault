@@ -155,7 +155,7 @@ func TestCapabilitiesReportExecJobsOnlyFromAJobBackend(t *testing.T) {
 	if jobs["exec_jobs"] != float64(1) || jobs["capabilities"] != "1.1" {
 		t.Fatalf("job backend: %v", jobs)
 	}
-	if len(jobs["ops"].([]any)) != 7 {
+	if len(jobs["ops"].([]any)) != 8 {
 		t.Fatalf("ops = %v", jobs["ops"])
 	}
 }
