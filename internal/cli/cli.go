@@ -204,7 +204,7 @@ func newRoot(g *globals, entered *bool) *cobra.Command {
 		SilenceErrors: true,
 		PersistentPreRunE: func(*cobra.Command, []string) error {
 			if g.Session != "" && !sessionRE.MatchString(g.Session) {
-				return usageError{"invalid --session: must match " + sessionRE.String()}
+				return usageError{"invalid --session: use <host>:<id> matching " + sessionRE.String() + ", the id the host gives its own session (see 'qbit-vault exec --help')"}
 			}
 			*entered = true
 			return nil

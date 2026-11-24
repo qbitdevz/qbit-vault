@@ -95,9 +95,27 @@ type execPlan struct {
 func newExec(g *globals) *cobra.Command {
 	var f execFlags
 	cmd := &cobra.Command{
-		Use:   "exec --session S --secret [ENV=]NAME ... [--timeout 10m] [--shell auto|sh|bash|cmd|pwsh] [--cwd DIR] [--stream] -- <command...>",
+		Use:   "exec [--session <host>:<id>] --secret [ENV=]NAME ... [--timeout 10m] [--shell auto|sh|bash|cmd|pwsh] [--cwd DIR] [--stream] -- <command...>",
 		Short: "Run a command with granted secrets injected into that child only",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Run a command with granted secrets injected into that child only.
+
+Without --session only a project grant applies: it is keyed by the repository,
+not by a session, so no id is needed (for example to run a long job as a host
+background job). A once or session grant belongs to the session it was granted
+to; exec needs --session <host>:<id> with that same id to use it, and refuses
+with grant_required otherwise. A sensitive secret only allows a once grant, so
+it needs --session. No grant is created, widened or consumed by leaving the
+flag out.
+
+--session (or $` + envSession + `) must match ` + sessionRE.String() + `.
+The id is the one the host gives its own session: the MCP server uses
+$` + envSession + ` or a generated mcp:<16 hex>, and the Pi extension passes pi:<id>.
+A shell the host starts does not receive it. 'qbit-vault grants --json' shows
+the session of every once and session grant that is live.
+
+The secrets are looked up from the repository of the working directory, or
+from --cwd when given; the command runs there.`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			plan, err := g.planExec(cmd, args, f)
 			if err != nil {
@@ -118,9 +136,6 @@ func newExec(g *globals) *cobra.Command {
 // planExec validates everything that needs no vault.
 func (g *globals) planExec(cmd *cobra.Command, args []string, f execFlags) (execPlan, error) {
 	var p execPlan
-	if g.Session == "" {
-		return p, usageError{"--session is required"}
-	}
 	switch n := len(f.secrets); {
 	case n == 0:
 		return p, usageError{"at least one --secret is required"}
@@ -236,7 +251,7 @@ func (g *globals) grantGate(stderr io.Writer, s *session, recs []vault.Entry, cw
 			d, m := grants.Check(work, e.Name, e.Layer.Key(), e.Record.ID, e.Record.Sensitive, g.Session, cwd, now)
 			mutated = mutated || m
 			if !d.Allowed {
-				return false, grantRefusal(e.Name, d.Why)
+				return false, grantRefusal(e.Name, d.Why, g.Session)
 			}
 			if d.Once != nil {
 				taken = append(taken, *d.Once)
@@ -275,8 +290,13 @@ func grantCwdOf(dir string) (string, error) {
 
 // grantRefusal is grant_required, saying what the user must do when a grant
 // exists but does not apply here (issue #42). It names no path and no value.
-func grantRefusal(name string, why grants.Why) refusal.Refusal {
+// With no session (exec without --session, issue #64) no once or session grant
+// can apply, so a refusal that has no other explanation says so.
+func grantRefusal(name string, why grants.Why, session string) refusal.Refusal {
 	r := refusal.New(refusal.GrantRequired, name)
+	if why == grants.WhyNone && session == "" {
+		return r.WithMessage(name + " has no project grant; a once or session grant needs --session <host>:<id>").WithHint(refusal.HintNeedsSession)
+	}
 	switch why {
 	case grants.WhyOtherDirectory:
 		return r.WithMessage(name + " has a project grant for another directory; call secret_request").WithHint(refusal.HintGrantNotApplying)

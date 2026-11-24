@@ -83,6 +83,7 @@ const (
 	HintBadRequest       = "Fix the request and call again."
 	HintCancelled        = "The call was cancelled before the user answered; call again only if the task still needs it."
 	HintNeedsRepository  = "Run it inside a repository, or ask for another scope."
+	HintNeedsSession     = "Without --session only a project grant applies; a once or session grant needs --session <host>:<id>, the id of the session it was granted to. Ask the user for a project grant, or pass --session."
 )
 
 // order is the contract table order.

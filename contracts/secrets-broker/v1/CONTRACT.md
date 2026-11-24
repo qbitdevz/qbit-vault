@@ -267,7 +267,7 @@ Hints by type (`dump_command` takes its hint from its `rule`, below):
 | `contract_mismatch` | Update qbit-vault; the user runs 'qbit-vault sync' and restarts the agent. |
 | `internal` | Report it; the user can run 'qbit-vault doctor'. |
 
-Six cases replace the hint of their type with another fixed text:
+Seven cases replace the hint of their type with another fixed text:
 
 - `grant_required` when a grant exists but does not apply here (another directory, or an earlier value): `A grant exists but does not apply here; call secret_request to ask the user for a new one.`
 - `vault_locked` when `exec` or `list` could show no unlock dialog (the `message` is the 1.4.0 text that names `qbit-vault unlock`): `No unlock dialog could be shown; ask the user to run 'qbit-vault unlock' in their terminal, then retry.`
@@ -275,6 +275,7 @@ Six cases replace the hint of their type with another fixed text:
 - `internal` for an invalid request field (`invalid request: <field>`): `Fix the request and call again.`
 - `internal` for a call cancelled before the user answered: `The call was cancelled before the user answered; call again only if the task still needs it.`
 - `scope_not_allowed` for a project grant outside a repository: `Run it inside a repository, or ask for another scope.`
+- `grant_required` from the command line `qbit-vault exec` run without `--session`, when no project grant applies (the `message` is `<NAME> has no project grant; a once or session grant needs --session <host>:<id>`): `Without --session only a project grant applies; a once or session grant needs --session <host>:<id>, the id of the session it was granted to. Ask the user for a project grant, or pass --session.` The broker always has a session, so an MCP or broker call never gets this one.
 
 For `dump_command` the `message` is `the command is refused while secrets are injected: <phrase>`:
 

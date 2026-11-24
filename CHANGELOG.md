@@ -16,6 +16,7 @@ Actionable refusals (issue #60, `odd/tasks/actionable-refusals.md`). The securit
 
 ### Changed
 
+- `qbit-vault exec` no longer needs `--session` (issue #64). Without it only a project grant applies; a secret whose only grant is `once` or `session` is refused `grant_required` with a hint that says it needs `--session <host>:<id>` and that a project grant needs none (nothing is created, widened or consumed, and a sensitive secret still needs a `once` grant, so it cannot run without a session). The audit records such a run as session `cli`. A malformed `--session` is still a usage error, which now states the format; `exec --help` says where a host's id comes from.
 - The `dump_command` message carries the rule phrase: `the command is refused while secrets are injected: <phrase>` (for example `it lists or reads the environment`).
 
 ### Fixed

@@ -119,7 +119,11 @@ func (w *world) wantRefusalIs(rf refusal.Refusal, args ...string) {
 		w.t.Fatalf("expected two refusal records, got %d", len(recs)-before)
 	}
 	last := recs[len(recs)-1]
-	if last.Refusal != string(typ) || last.Session != sessA {
+	wantSession := sessA
+	if !slices.Contains(args, "--session") {
+		wantSession = cliSession // no --session: the audit's own "no session"
+	}
+	if last.Refusal != string(typ) || last.Session != wantSession {
 		w.t.Fatalf("refusal record %+v", last)
 	}
 	if name != "" && !slices.Equal(last.Names, []string{name}) {
@@ -150,7 +154,6 @@ func TestExecUsageErrors(t *testing.T) {
 		args []string
 		msg  string
 	}{
-		{"no session", []string{"exec", "--secret", "GITHUB_TOKEN", "--", "x"}, "--session is required"},
 		{"no secret", []string{"--session", sessA, "exec", "--", "x"}, "at least one --secret is required"},
 		{"too many secrets", append([]string{"--session", sessA, "exec"}, append(many, "--", "x")...), "at most 16 --secret flags"},
 		{"lowercase name", []string{"--session", sessA, "exec", "--secret", "github", "--", "x"}, "invalid --secret: use NAME or ENV=NAME with valid names"},
@@ -776,6 +779,41 @@ func TestExecLeakBattery(t *testing.T) {
 			captured.WriteString(out + errs)
 		}
 	}
+
+	// exec without --session (issue #64): a project grant runs and is
+	// redacted in every output mode; a once or session grant, a sensitive
+	// secret and a malformed --session are refused or rejected with fixed
+	// text, the value typed into the command or the flag repeated nowhere.
+	w.setSecret("ONCE_TOKEN", xv, "--global")
+	w.grantTo(sessA, "ONCE_TOKEN", "once")
+	w.setSecret("SENSITIVE_TOKEN", xv, "--global", "--sensitive")
+	w.grantTo(sessA, "SENSITIVE_TOKEN", "once")
+	w.inRepo()
+	w.mustRun("y\n", "grant", "GITHUB_TOKEN", "--scope", "project")
+	for _, asJSON := range []bool{false, true} {
+		for _, extra := range [][]string{nil, {"--stream"}} {
+			args := noSessionArgs([]string{"GITHUB_TOKEN"}, run+" # "+xv, extra...)
+			if asJSON {
+				args = append([]string{"--json"}, args...)
+			}
+			if code, out, errs := w.run("", args...); code != 0 {
+				t.Fatalf("session-less exec with a project grant: code=%d out=%q err=%q", code, out, errs)
+			} else {
+				captured.WriteString(out + errs)
+			}
+		}
+	}
+	for _, name := range []string{"ONCE_TOKEN", "SENSITIVE_TOKEN"} {
+		for _, args := range [][]string{{}, {"--json"}} {
+			_, out, errs = w.run("", append(args, noSessionArgs([]string{name}, "true # "+xv)...)...)
+			captured.WriteString(out + errs)
+		}
+	}
+	for _, args := range [][]string{{}, {"--json"}} {
+		_, out, errs = w.run("", append(args, "--session", xv, "exec", "--secret", "GITHUB_TOKEN", "--", "true")...)
+		captured.WriteString(out + errs)
+	}
+	w.outRepo()
 
 	needles := map[string]string{
 		"raw":  xv,

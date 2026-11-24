@@ -73,7 +73,7 @@ Two rules shape everything:
 ## Process model
 
 - No daemon. Every host operation is a fresh `qbit-vault` process (CLI) or a long-lived stdio MCP server **started and owned by the host** (one per host session). Both are stateless apart from the files in `$QBIT_VAULT_HOME`.
-- Session identity: the caller passes `--session <id>` (`^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$`, or `QBIT_VAULT_SESSION`). The MCP server uses `QBIT_VAULT_SESSION` when set and otherwise generates `mcp:<16 hex>` for its lifetime. The Pi extension passes `pi:<id>` to the commands that take `--session`. The hooks do not take part in grants. Grants are keyed by it.
+- Session identity: the caller passes `--session <id>` (`^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$`, or `QBIT_VAULT_SESSION`). The MCP server uses `QBIT_VAULT_SESSION` when set and otherwise generates `mcp:<16 hex>` for its lifetime. The Pi extension passes `pi:<id>` to the commands that take `--session`. The hooks do not take part in grants. `once` and `session` grants are keyed by it; `qbit-vault exec` may be run without one (issue #64), and then only `project` grants, which are keyed by the repository, apply.
 - Keychain unlock happens per process; the OS caches it. In passphrase mode the unlocked key is cached with a TTL only in a `0600` file under `$XDG_RUNTIME_DIR` (tmpfs on Linux), so the user is not asked on every exec; where no such memory-backed directory exists there is no cache and the passphrase is asked on each unlock.
 
 ## Data flows
