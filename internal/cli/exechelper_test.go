@@ -69,12 +69,52 @@ func childMain(mode string) {
 	case "sabotage-audit": // arg is the vault home: replace the audit log by a directory
 		_ = os.Remove(filepath.Join(arg, "audit.jsonl"))
 		_ = os.Mkdir(filepath.Join(arg, "audit.jsonl"), 0o700)
+	case "jobs-out": // a first line, a pause of arg milliseconds, a second line
+		ms, _ := strconv.Atoi(arg)
+		fmt.Println("first")
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		fmt.Println("second")
+	case "pid-sleep": // writes its pid to the file arg, then waits a minute
+		_ = os.WriteFile(arg, []byte(strconv.Itoa(os.Getpid())), 0o600)
+		time.Sleep(time.Minute)
+	case "gate": // "before", then waits for the file arg to exist, then "after"
+		fmt.Println("before")
+		waitForFile(arg)
+		fmt.Println("after")
+	case "gated-split": // arg is dir|VAR: the value of VAR in two halves, raw then base64, each half after a gate
+		dir, name, _ := strings.Cut(arg, "|")
+		v := os.Getenv(name)
+		b := base64.StdEncoding.EncodeToString([]byte(v))
+		os.Stdout.WriteString("raw:" + v[:len(v)/2])
+		touch(filepath.Join(dir, "ready1"))
+		waitForFile(filepath.Join(dir, "go1"))
+		os.Stdout.WriteString(v[len(v)/2:] + "\n")
+		os.Stderr.WriteString("b64:" + b[:len(b)/2])
+		touch(filepath.Join(dir, "ready2"))
+		waitForFile(filepath.Join(dir, "go2"))
+		os.Stderr.WriteString(b[len(b)/2:] + "\n")
+	case "cut-sleep": // all but the last byte of env var arg, then waits a minute
+		v := os.Getenv(arg)
+		os.Stdout.WriteString("p:" + v[:len(v)-1])
+		time.Sleep(time.Minute)
 	case "cat":
 		buf := make([]byte, 64)
 		n, _ := os.Stdin.Read(buf)
 		os.Stdout.Write(buf[:n])
 	}
 	os.Exit(code)
+}
+
+func touch(path string) { _ = os.WriteFile(path, nil, 0o600) }
+
+// waitForFile blocks the child until path exists (at most 30 s).
+func waitForFile(path string) {
+	for i := 0; i < 1500; i++ {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // child selects the child's mode for the next exec and returns the command

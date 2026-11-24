@@ -3,7 +3,10 @@ package prompt
 import (
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // powershellTool shows a WinForms dialog (L4). The script goes to
@@ -101,7 +104,12 @@ func psScript(d dialog) string {
 	accept := "$ok"
 	switch d.kind {
 	case dialogSecret:
-		b.WriteString(psSecretInput)
+		if d.visible {
+			b.WriteString(psSecretInput + "$p.Controls.Add($tb)\n")
+		} else {
+			b.WriteString(psEye(d.loc) + psSecretInput + "AddInput $tb 520 $hide\n")
+		}
+		b.WriteString("$first = $tb\n")
 	case dialogChoose:
 		b.WriteString(psChooseInput)
 	case dialogShow:
@@ -140,13 +148,16 @@ $f.Text = $title
 $f.TopMost = $true
 $f.StartPosition = 'CenterScreen'
 $f.FormBorderStyle = 'FixedDialog'
-$f.MinimizeBox = $false
+$f.MinimizeBox = $true
 $f.MaximizeBox = $false
 $f.AutoSize = $true
 $f.AutoSizeMode = 'GrowAndShrink'
 $f.BackColor = Col '#07121B'
 $f.ForeColor = Col '#C7D9DE'
 $f.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+$first = $null
+$global:wasMin = $false
+$f.Add_Resize({ if ($this.WindowState -eq [System.Windows.Forms.FormWindowState]::Minimized) { $global:wasMin = $true } elseif ($global:wasMin) { $global:wasMin = $false; $this.TopMost = $true; $this.Activate(); if ($null -ne $first) { $first.Focus() | Out-Null } } })
 $p = New-Object System.Windows.Forms.FlowLayoutPanel
 $p.FlowDirection = 'TopDown'
 $p.WrapContents = $false
@@ -184,7 +195,22 @@ $tb.ForeColor = Col '#C7D9DE'
 $tb.Font = New-Object System.Drawing.Font('Consolas', 11)
 $tb.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
 $tb.MaxLength = 70000
-$p.Controls.Add($tb)
+`
+
+// The minimize box (S4): a minimized dialog stays in the taskbar, and when it
+// is restored it comes back in front (TopMost) with the input focused. The
+// prompt timeout is the Go side's and still ends it. The handler only acts on
+// a restore, not on the first show.
+
+// psEye (S5) defines AddInput: a masked input gets a toggle button to its
+// right that shows the typed value while it is switched on; a visible one is
+// added as it was. The button is a normal tab stop (Space toggles it), is not
+// the AcceptButton, never takes the initial focus, starts off (masked), and
+// has an accessible name that follows its state. It only flips
+// UseSystemPasswordChar on the box: the value goes nowhere else. The labels
+// come from the catalogue, as base64 data like every other text of the script.
+const psEyeCode = `$eyes = @()
+function AddInput($box, $w, $masked) { if (-not $masked) { $box.Width = $w; $p.Controls.Add($box); return }; $c = New-Object System.Windows.Forms.CheckBox; $c.Appearance = 'Button'; $c.FlatStyle = 'Flat'; $c.FlatAppearance.BorderColor = Col '#16303D'; $c.FlatAppearance.CheckedBackColor = Col '#16303D'; $c.AutoSize = $false; $c.Size = New-Object System.Drawing.Size(60, 26); $c.TextAlign = 'MiddleCenter'; $c.Margin = New-Object System.Windows.Forms.Padding(0); $c.BackColor = Col '#07121B'; $c.ForeColor = Col '#C7D9DE'; $c.UseMnemonic = $false; $c.Text = $tShow; $c.AccessibleName = $tShowValue; $c.Checked = $false; $c.Add_CheckedChanged({ $box.UseSystemPasswordChar = -not $this.Checked; if ($this.Checked) { $this.Text = $tHide; $this.AccessibleName = $tHideValue } else { $this.Text = $tShow; $this.AccessibleName = $tShowValue } }.GetNewClosure()); $box.Width = $w - 66; $m = $box.Margin; $box.Margin = New-Object System.Windows.Forms.Padding(0, 0, 6, 0); $row = New-Object System.Windows.Forms.FlowLayoutPanel; $row.FlowDirection = 'LeftToRight'; $row.WrapContents = $false; $row.AutoSize = $true; $row.Margin = $m; $row.Controls.Add($box); $row.Controls.Add($c); $p.Controls.Add($row); $global:eyes += $c }
 `
 
 // psShowText puts the code of a show dialog (a recovery key, a pairing code)
@@ -263,3 +289,23 @@ $out.Flush()
 
 const psChooseOutput = `for ($i = 0; $i -lt $radios.Count; $i++) { if ($radios[$i].Checked) { [System.Console]::Out.Write([string]($i + 1)) } }
 `
+
+// psEye is the toggle code with its four labels in loc, set as variables
+// first: base64 data decoded by the script, so a label of any language
+// travels as ASCII.
+func psEye(loc i18n.Locale) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "$tShow = Dec %s\n", psString(loc.T("eye.show")))
+	fmt.Fprintf(&b, "$tHide = Dec %s\n", psString(loc.T("eye.hide")))
+	fmt.Fprintf(&b, "$tShowValue = Dec %s\n", psString(loc.T("eye.show_value")))
+	fmt.Fprintf(&b, "$tHideValue = Dec %s\n", psString(loc.T("eye.hide_value")))
+	// The button is as wide as its longest label needs: the box gives up the
+	// same width, so the row keeps the width of the input it replaces.
+	w := 60
+	if n, err := strconv.Atoi(loc.T("eye.width")); err == nil && n >= 60 && n <= 120 {
+		w = n
+	}
+	code := strings.Replace(psEyeCode, "Size(60, 26)", fmt.Sprintf("Size(%d, 26)", w), 1)
+	code = strings.Replace(code, "$box.Width = $w - 66", fmt.Sprintf("$box.Width = $w - %d", w+6), 1)
+	return b.String() + code
+}

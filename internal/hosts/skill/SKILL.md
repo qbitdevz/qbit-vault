@@ -17,19 +17,36 @@ qbit-vault is the user's local secrets broker. You can run commands that need a 
 ## How to use it
 
 1. `secret_list` first. It returns the names visible from this directory (global ones and this project's), their metadata and the rules you must follow. It never returns values. A secret's `grant` is what `secret_exec` will accept from this directory; `null` means it will refuse. When `grant_note` is present a grant exists but does not apply here (another directory, or an earlier value): call `secret_request`.
-2. Missing a name, or need permission for one: `secret_request` with every name the task needs in one call (up to 8 fields) and a concrete reason ("run `gh release create` for v1.2", not "needed"). The user types new values or approves existing ones in a dialog outside the chat. You get references and a grant, never the value.
+2. Missing a name, or need permission for one: `secret_request` with every name the task needs in one call (up to 8 fields) and a concrete reason ("run `gh release create` for v1.2", not "needed"), written in the conversation language together with `locale` (see Dialog language). The user types new values or approves existing ones in a dialog outside the chat. You get references and a grant, never the value.
 3. Run the command with `secret_exec`: the command plus `secrets: [{name}]`; each secret becomes an environment variable of that one process. Reference it the way the shell expects (`$GITHUB_TOKEN`, `%GITHUB_TOKEN%`, `$env:GITHUB_TOKEN`).
 4. Read the redacted output. `[REDACTED:NAME]` in it is expected; never try to recover what is behind it.
-5. To change a secret (remove it, edit its metadata, move it between global and this project, or replace its value) use `secret_manage` with a concrete reason; the user confirms outside the chat. A replace also lets the user set the new value's permission in the same dialog, so retry `secret_exec` right after it.
+5. To change a secret (remove it, edit its metadata, move it between global and this project, replace its value, or revert it to the previous one) use `secret_manage` with a concrete reason; the user confirms outside the chat. A replace also lets the user set the new value's permission in the same dialog, so retry `secret_exec` right after it.
+
+## Dialog language
+
+The user answers qbit-vault's dialogs in their own language. Always send `locale` with every `secret_request`, `secret_list`, `secret_exec`, `secret_exec_start`, `secret_manage` and `secret_check` call: the BCP 47 tag of the language you are speaking with the user in (`es-ES`, `en-GB`; a plain `es` or `en` is fine). qbit-vault writes every dialog itself, in English or Spanish, from its own texts: you choose only the language and never supply dialog text. Also write the `reason` in that same language, because the user reads it word for word in the dialog and it is never translated.
+
+Secret names, scopes (`once`, `session`, `project`), layers (`global`, `project`), host names and paths stay exactly as they are in every language, so what the user approves is what you and the audit log name. A `locale` qbit-vault does not know is ignored, never an error: send your best tag.
 
 ## When a service rejects the credential
 
-An `exec` that runs but gets `401`, `403`, "invalid token" or "authentication failed" back means the stored value is wrong for that service, not that qbit-vault failed. Do not loop:
+An `exec` that runs but gets `401`, `403`, "invalid token" or "authentication failed" back means a stored value is wrong for that service, not that qbit-vault failed. Do not loop, and do not replace a secret on a guess:
 
-1. Check presence only: `${#NAME}` prints the length. Never print, echo, dump, encode or hash the value to inspect it (that is refused as `dump_command`, and it would leak it).
-2. Tell the user what the service expects, as precisely as you can: the credential type (for Cloudflare an API Token, not the Global API Key), the scopes or permissions, the account or zone.
-3. Propose **one** `secret_manage` replace with that in the reason. qbit-vault points out pasted quotes or invisible characters before saving, which is a common cause.
-4. If the new value is rejected too, stop and report what the service answered; do not ask again.
+1. Call `secret_check` with every secret the failed call used: the password or token, and also the identifier fields (an email, a username, a host, an account id), because the wrong one is often not the password. It returns no value and no part of one: for each name its `length`, whether it is `empty`, has padding `whitespace` (a trailing newline included) or is `multiline`, whether it is a `placeholder` (`change-me`, `TODO`, `xxx`...), what it `looks_like` (`email`, `url`, `jwt`, `pem`, `uuid`, `hex`, `base64`, `number` or `text`; a guess from the shape only) and `same_as`, the other names of that call that hold an identical value. It needs a usable grant for each name (a refusal names the one that lacks it: ask for it with `secret_request`) and it does not spend a `once` grant, so the next `secret_exec` still runs. Never print, echo, dump, encode or hash a value to inspect it: that is refused as `dump_command` and would leak it.
+   `secret_list` also shows, for each secret, when a command last had it injected on this device (`last_used_at`), how that command ended (`last_exit_code`) and when one last ended with exit 0 (`last_ok_at`); each is absent for a secret that was never used. Read it as a hint only: an exit code of 0 is a hint, not proof the service accepted the credential (a command can exit 0 after a rejected call), and a failing exit code may come from the command, not the credential. A secret that was never used successfully (no `last_ok_at`), together with what `secret_check` shows, is the signal to question the stored value before the user's memory; one that worked recently points at the service, its scopes or the command instead.
+2. Tell the user in plain words what the check shows, for example "LOGIN_EMAIL does not look like an email and holds the same value as LOGIN_PASSWORD", or "API_TOKEN ends with a newline". When it shows nothing wrong, say that too: the value may be well formed and still not be the credential the service wants.
+3. Tell the user what the service expects, as precisely as you can: the credential type (for Cloudflare an API Token, not the Global API Key), the scopes or permissions, the account or zone.
+4. Only then, and only for the secret the evidence points to, propose **one** `secret_manage` replace with that evidence in the reason. Do not propose a replace for a secret the check shows nothing wrong with unless the user says it is the wrong one. qbit-vault points out pasted quotes or invisible characters before saving, which is a common cause, and asks the user before saving a value that equals the one it replaces or another secret's: a decline answers `user_declined`, which ends the attempt (do not ask again, and you are never told which secret matched); always call `secret_check` before you propose a `secret_manage` replace after a rejection.
+5. If the new value is rejected too, check whether the replace was the mistake. When `secret_list` shows `previous_until` for that secret, the value it replaced is still recoverable until then: propose `secret_manage` with the action `revert` and a reason that says what the service answered, instead of asking the user to remember the old value. The user confirms in a dialog outside the chat; qbit-vault never shows you either value, and a revert swaps the two, so it can be undone, and ends the permissions given for that secret (ask for a grant again with `secret_request`). Without `previous_until` there is nothing to restore (it was never replaced, the replaced value is older than 7 days, or the secret was removed): say so and ask the user for the right value.
+6. If that is rejected too, stop and report what the service answered; do not ask again.
+
+## Long commands
+
+A `secret_exec` call lasts only as long as the host's own request timeout allows: 60 seconds in some hosts, longer or unlimited in hosts that reset their timeout while the server reports progress. `timeout_ms` only bounds the command; it never makes the call last longer. Do not start a job with `setsid`, `nohup` or `&` to get past the limit: `secret_exec` ends its children when it returns, and a job started outside it is not redacted. Routes, in order:
+
+1. A command that finishes well within 30 seconds: `secret_exec`.
+2. Anything that may pass about 30 seconds (a build, a test suite, a deploy, a migration): `secret_exec_start`, with the same arguments as `secret_exec`. It answers every refusal `secret_exec` would, with the same hints, and otherwise returns a `job` id as soon as the command has started (a once grant is spent then). Call `secret_exec_status` with that `job` and a `wait_ms` such as 30000 (at most 50000): it returns early when the job ends, otherwise after the wait, with the `state` (`running`, `exited`, `timed_out` or `stopped`), the `exit_code` once it ended and the redacted `stdout` and `stderr` produced since your previous call. Each output is returned once, so keep what you need (output a job printed is available at the next call; only the end of a line that could be the start of a secret value is held back until more output arrives or the job ends), and keep calling while the state is `running`. A call that returns a finished state is the last one for that job. Use `secret_exec_stop` for a job that is stuck or that you no longer need: it kills the whole process tree, so stop a job that would leave test data or a server behind instead of abandoning it. At most 4 jobs run at once, and the server keeps at most 8 finished jobs you have not read, so read a job's result before starting many more, and every job ends when the MCP server stops, so a job does not outlive the session. A `job` the server does not know (finished and reported, stopped, expired after 10 minutes unread) is a refusal: start a new one.
+3. The MCP tools are not available, or the job must outlive this session: run `qbit-vault exec --secret NAME -- <command>` as your host's background job (its shell tool, in the repository or one of its linked Git worktrees, which share the main clone's project). Pass no `--session`: without it only a project grant applies, and the output is redacted the same way. If it answers `grant_required` with the hint about `--session`, the secret has only a once or session grant (or is sensitive): call `secret_request` and ask for the project scope ("always in this project"), then run it again. A secret the user marked sensitive cannot run this way.
 
 ## Background jobs, scripts and subagents
 
@@ -47,19 +64,27 @@ The host runs qbit-vault over what your built-in tools return and over the files
 ## Rules
 
 - Never print, echo, copy, encode or write a secret value, and never ask the user to paste one into the chat.
-- Never print the environment (`env`, `printenv`, `set`, `/proc/*/environ`) while secrets are injected: it is refused. To check that a value is present use its length only: `${#NAME}`.
+- Never print the environment (`env`, `printenv`, `set`, `/proc/*/environ`) while secrets are injected: it is refused. To check that a value is present or what it looks like, use `secret_check`; for a length alone `${#NAME}` also works.
 - You cannot grant access and you cannot use another project's secrets; only the user grants, in the dialog.
 - Ask only for what the current task needs.
 
 ## Refusals and what to do
 
+Every refusal carries a `hint`: fixed text saying what to do next. Follow it. A `dump_command` refusal also carries a `rule` (why it was refused, below) and often a `segment` (the 0-based pipeline segment that matched). An unlocked vault and a valid grant never override the dump guard: do not unlock, request a grant or retry the same command to get past it. Filtering the output (`| jq`, `| grep`) does not exempt an earlier pipeline segment, because the command is refused before any process starts.
+
 | Refusal | What to do |
 | --- | --- |
-| `grant_required` | Call `secret_request` for that name (the user approves it), then retry `secret_exec` once. The message may say the grant is for another directory or an earlier value: the same answer, and run the command from the directory the grant was approved in if you can. |
+| `grant_required` | Call `secret_request` for that name (the user approves it), then retry `secret_exec` (or `secret_check`) once. The message may say the grant is for another directory or an earlier value: the same answer, and run the command from the directory the grant was approved in if you can. |
 | `unknown_secret` | The name does not exist here: call `secret_request` so the user can store it. |
 | `user_declined` | Stop asking for it; tell the user what could not be done. Do not re-ask during the cooldown. |
 | `reason_too_vague` | Rephrase the reason: what command, what for. |
-| `dump_command` | The command would print a secret or the environment. Rewrite it so it does not. |
+| `dump_command` | Read the `rule` and the `hint`, then rewrite the command; the table below has one row per rule. |
+| `dump_command` / `environment_dump` | The command lists or reads the environment (`env`, `printenv`, `set`, `/proc/*/environ`, an interpreter script that reads it). Run the program that needs the secret and let it read its own environment; to check a secret is set use `${#NAME}`. |
+| `dump_command` / `value_print` | The command prints a secret value (`echo`, `printf`, `Write-Output` of `$NAME`). Do not print it; check presence with `${#NAME}`. |
+| `dump_command` / `value_encode` | The command encodes a value (`base64`, `xxd`, `od`, `hexdump`). Encoding does not hide a value; pass it to the program that needs it through its environment. |
+| `dump_command` / `network_argument` | The value is in the arguments of `curl`, `wget`, `http`, `nc`, `ncat` or `socat`, in any pipeline segment. Use a client that reads the credential from its own environment variable or config (`gh` with `GH_TOKEN`, a script that reads `os.environ`) or a config file the client loads. |
+| `dump_command` / `encoded_script` | A PowerShell `-EncodedCommand` script cannot be checked. Pass the script as plain text. |
+| `dump_command` / `custom_rule` | The command matches a rule in the user's `dumpguard.yaml`, which is not shown. Ask the user. |
 | `scope_binary` | The secret is limited to other programs. Tell the user; they can change its allowlist. |
 | `scope_not_allowed` | The secret is sensitive: only a one-time (`once`) grant is possible. |
 | `rate_limited` | You asked again too soon after a decline. Back off; do not retry now, tell the user what is blocked. |
@@ -68,8 +93,8 @@ The host runs qbit-vault over what your built-in tools return and over the files
 | `not_model_callable` | That operation is not yours to call. Stop and tell the user; do not try another route to the same effect. |
 | `vault_locked` | Every tool asks the user for the passphrase in a dialog that names you and the secret, so a locked vault is not a reason to stop and you never ask the user to type a command for it. A cancelled dialog or a wrong passphrase also answers this: call the tool again only if the task still needs it (a wrong passphrase is asked again). `secret_list` and `secret_exec` ask the same way as `secret_request` and `secret_manage`. Only when the message says no unlock dialog could be shown (no dialog is possible here, or the user turned it off) ask the user to run `qbit-vault unlock` in their terminal, then retry. |
 | `vault_corrupt` | The vault failed its integrity check. Stop; tell the user to run `qbit-vault restore`. |
-| `timeout` | The command ran past `timeout_ms` and was killed; the redacted output so far is in `partial`. Raise `timeout_ms` or run something shorter. |
+| `timeout` | The command ran past `timeout_ms` and was killed; the redacted output so far is in `partial`. Raise `timeout_ms` or run something shorter. A job reports the same as the state `timed_out`. |
 | `contract_mismatch` | This server and the tools disagree on the contract version. Tell the user to run `qbit-vault sync` and restart the agent. |
-| `internal` | A malformed argument, a missing prompt, or a call cancelled before the user answered (the message says which). Fix the arguments and retry once; otherwise tell the user. Nothing was stored or granted. |
+| `internal` | A malformed argument, a missing prompt, or a call cancelled before the user answered (the message says which). Fix the arguments and retry once; otherwise tell the user. Nothing was stored or granted. For jobs: `too many running jobs` is retryable (wait for a job with `secret_exec_status` or stop one with `secret_exec_stop`, then start again); `no such job` means start a new one with `secret_exec_start`. |
 
 If the qbit-vault tools are not available in this session, tell the user to run `qbit-vault doctor` and restart the agent; do not fall back to asking for the value.

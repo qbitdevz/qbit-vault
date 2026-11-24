@@ -3,6 +3,8 @@ package prompt
 import (
 	"strings"
 	"testing"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // S4.2: a question that is not a secret request (the joiner's confirmation
@@ -12,7 +14,7 @@ var codeReq = SecretRequest{Name: "confirmation code", Heading: "Confirmation co
 	Reason: "Type the confirmation code shown on the device that approved this one"}
 
 func TestHeadingRequestHasItsOwnDialog(t *testing.T) {
-	d := secretDialog(codeReq)
+	d := secretDialog(i18n.En, codeReq)
 	if d.heading != "Confirmation code" || d.text != codeReq.Reason || d.visible || len(d.rows) != 0 || d.tail != "" {
 		t.Fatalf("dialog = %+v", d)
 	}
@@ -23,7 +25,7 @@ func TestHeadingRequestHasItsOwnDialog(t *testing.T) {
 		t.Errorf("text still carries the request lines: %q", d.plain())
 	}
 	// The question is escaped like any other text.
-	e := secretDialog(SecretRequest{Heading: "H", Reason: "a\nb\x1b"})
+	e := secretDialog(i18n.En, SecretRequest{Heading: "H", Reason: "a\nb\x1b"})
 	if e.text != `a\nb\x1b` {
 		t.Errorf("text = %q", e.text)
 	}
@@ -51,7 +53,7 @@ func TestHeadingRequestOnTheTerminal(t *testing.T) {
 }
 
 func TestHeadingRequestOnEveryNativeHelper(t *testing.T) {
-	d := secretDialog(codeReq)
+	d := secretDialog(i18n.En, codeReq)
 	if s := string(powershellTool{}.build("powershell.exe", d).Stdin); !strings.Contains(s, "$heading = Dec "+psString("Confirmation code")) || strings.Contains(s, "Saved in") {
 		t.Errorf("powershell:\n%s", s)
 	}

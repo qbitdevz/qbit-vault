@@ -147,7 +147,11 @@ func (v *Vault) ImportAll(layers []LayerRecords, ed GrantsEditor) (GrantsResult,
 					if rec.UpdatedAt == "" {
 						rec.UpdatedAt = rec.CreatedAt
 					}
-					secrets[nr.Name] = toWire(rec)
+					w := toWire(rec)
+					if old, ok := secrets[nr.Name]; ok {
+						w.Previous = previousAfterReplace(old, w, ts)
+					}
+					secrets[nr.Name] = w
 				}
 			}
 			return nil

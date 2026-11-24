@@ -573,3 +573,47 @@ func TestRunReportsWhetherTheChildStarted(t *testing.T) {
 		t.Fatalf("an unknown shell: %+v err %v", res, err)
 	}
 }
+
+// OnStart runs once, while the child is still running, so a caller can tell a
+// command that started from one that ended or never started.
+func TestRunCallsOnStartOnceWhileTheChildRuns(t *testing.T) {
+	helper(t, "sleep", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := spec(t, nil)
+	calls := make(chan struct{}, 4)
+	s.OnStart = func() { calls <- struct{}{} }
+	done := make(chan error, 1)
+	go func() { _, err := Run(ctx, s); done <- err }()
+	select {
+	case <-calls:
+	case <-time.After(20 * time.Second):
+		t.Fatal("OnStart was not called")
+	}
+	select {
+	case <-done:
+		t.Fatal("Run had returned when OnStart ran")
+	default:
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("err %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("OnStart ran %d more times", len(calls))
+	}
+}
+
+func TestRunDoesNotCallOnStartWhenTheCommandCannotStart(t *testing.T) {
+	s := spec(t, nil)
+	s.Command = "exit 0"
+	s.Shell = Shell("nope")
+	called := false
+	s.OnStart = func() { called = true }
+	if _, err := Run(context.Background(), s); err == nil {
+		t.Fatal("an unknown shell started")
+	}
+	if called {
+		t.Fatal("OnStart ran for a command that never started")
+	}
+}

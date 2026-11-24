@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // S7.2: a command the user runs names the user, without the subcommand.
@@ -46,17 +48,17 @@ func TestPassphraseLabelsOnTheTerminal(t *testing.T) {
 }
 
 func TestPassphraseDialogs(t *testing.T) {
-	d := passphraseDialog(ExportPassphrase, false)
+	d := passphraseDialog(i18n.En, ExportPassphrase, false)
 	if d.title != "QBit Vault" || d.heading != "Export passphrase" || d.text != "Export passphrase (protects this backup file):" {
 		t.Errorf("export dialog = %q / %q / %q", d.title, d.heading, d.text)
 	}
-	if a := passphraseDialog(ExportPassphrase, true); a.text != "Type the export passphrase again:" || a.heading != "Export passphrase" {
+	if a := passphraseDialog(i18n.En, ExportPassphrase, true); a.text != "Type the export passphrase again:" || a.heading != "Export passphrase" {
 		t.Errorf("again dialog = %q / %q", a.heading, a.text)
 	}
-	if v := passphraseDialog(VaultPassphrase, false); v.heading != "Vault passphrase" || v.text != "Vault passphrase:" {
+	if v := passphraseDialog(i18n.En, VaultPassphrase, false); v.heading != "Vault passphrase" || v.text != "Vault passphrase:" {
 		t.Errorf("vault dialog = %q / %q", v.heading, v.text)
 	}
-	if i := passphraseDialog(ImportPassphrase, false); i.heading != "Export passphrase" || i.text != "Passphrase of the export file:" {
+	if i := passphraseDialog(i18n.En, ImportPassphrase, false); i.heading != "Export passphrase" || i.text != "Passphrase of the export file:" {
 		t.Errorf("import dialog = %q / %q", i.heading, i.text)
 	}
 }
@@ -67,7 +69,7 @@ func TestFormHeaderHasNoValueLine(t *testing.T) {
 		{Name: "HOST", Reason: "r", Host: "claude", Visible: true},
 		{Name: "TOKEN", Reason: "r", Host: "claude", Existing: true},
 	}
-	d := formDialog(reqs)
+	d := formDialog(i18n.En, reqs)
 	if strings.Contains(d.text, "Value:") || strings.Contains(d.text, "as you type") {
 		t.Errorf("form text has a Value line:\n%s", d.text)
 	}

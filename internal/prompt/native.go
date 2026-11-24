@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 	"github.com/qbitdevz/qbit-vault/internal/secret"
 )
 
@@ -53,6 +54,7 @@ type dialog struct {
 	fields      []formField // a form dialog's boxes
 	okLabel     string      // the accept button, where the helper can set it
 	cancelLabel string
+	loc         i18n.Locale // the language of the texts above, for the builders
 }
 
 // command is a helper invocation. Stdin holds the script, when the helper
@@ -272,12 +274,20 @@ type native struct {
 	timeout time.Duration
 	open    func() (Terminal, error) // the terminal, for what a helper cannot show
 	ctx     context.Context          // ends every dialog with it; nil is never
+	loc     i18n.Locale              // the language of the texts the backend adds
 }
 
 // WithContext implements Contexter.
 func (n *native) WithContext(ctx context.Context) Backend {
 	c := *n
 	c.ctx = ctx
+	return &c
+}
+
+// WithLocale implements Localizer.
+func (n *native) WithLocale(loc i18n.Locale) Backend {
+	c := *n
+	c.loc = loc
 	return &c
 }
 
@@ -340,20 +350,20 @@ func (n *native) read(name string, d dialog, kind inputKind) (secret.Secret, err
 }
 
 func (n *native) Secret(req SecretRequest) (secret.Secret, error) {
-	return n.read(req.Name, secretDialog(req), valueInput)
+	return n.read(req.Name, secretDialog(n.loc, req), valueInput)
 }
 
 func (n *native) Passphrase(req PassphraseRequest) (secret.Secret, error) {
 	for try := 1; ; try++ {
-		d := passphraseDialog(req, false)
+		d := passphraseDialog(n.loc, req, false)
 		if try > 1 {
-			d = retryDialog(req)
+			d = retryDialog(n.loc, req)
 		}
 		first, err := n.read("passphrase", d, passphraseInput)
 		if err != nil || !req.Confirm {
 			return first, err
 		}
-		second, err := n.read("passphrase", passphraseDialog(req, true), passphraseInput)
+		second, err := n.read("passphrase", passphraseDialog(n.loc, req, true), passphraseInput)
 		if err != nil {
 			first.Wipe()
 			return secret.Secret{}, err
@@ -377,7 +387,7 @@ func (n *native) Choose(q string, options []string, def int) (int, error) {
 	if def < 0 || def >= len(options) {
 		return 0, errors.New("prompt: default choice out of range")
 	}
-	r, st, err := n.ask(chooseDialog(q, options, def))
+	r, st, err := n.ask(chooseDialog(n.loc, q, options, def))
 	if err != nil {
 		return 0, err
 	}
@@ -393,7 +403,7 @@ func (n *native) Choose(q string, options []string, def int) (int, error) {
 }
 
 func (n *native) Confirm(q string) (bool, error) {
-	_, st, err := n.ask(confirmDialog(q))
+	_, st, err := n.ask(confirmDialog(n.loc, q))
 	if err != nil {
 		if errors.Is(err, ErrCancelled) {
 			return false, nil

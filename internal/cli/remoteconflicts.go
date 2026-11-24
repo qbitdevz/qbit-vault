@@ -171,9 +171,10 @@ func newRemoteResolve(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			q := fmt.Sprintf("Resolve the sync conflict of %s (%s): keep the current version and discard the kept one?", name, whereText(layer))
+			loc := g.loc()
+			q := loc.T("q.conflict_keep", name, whereText(loc, layer))
 			if keep == string(vault.KeepConflict) {
-				q = fmt.Sprintf("Resolve the sync conflict of %s (%s): swap in the kept version? The current one becomes the kept one.", name, whereText(layer))
+				q = loc.T("q.conflict_swap", name, whereText(loc, layer))
 			}
 			if err := askYes(ask, q); err != nil {
 				return err

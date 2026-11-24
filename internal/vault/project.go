@@ -10,8 +10,11 @@ import (
 
 // ProjectRoot returns the canonical repository root of cwd: the nearest
 // ancestor containing a .git entry (a directory, or the file of a linked
-// worktree). The root is absolute, symlink-free and, on Windows and macOS,
-// case-folded. ok is false when cwd is not inside a repository.
+// worktree). A linked worktree whose link to its main clone is confirmed in
+// both directions (linkedMainTree) has the main clone's root: they share one
+// project. Any other .git file makes its own directory the root. The root is
+// absolute, symlink-free and, on Windows and macOS, case-folded. ok is false
+// when cwd is not inside a repository.
 func ProjectRoot(cwd string) (root string, ok bool, err error) {
 	root, _, ok, err = findRoot(cwd)
 	return root, ok, err
@@ -49,6 +52,11 @@ func findRoot(cwd string) (root, label string, ok bool, err error) {
 			return "", "", false, nil
 		}
 		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			// A linked worktree shares the project of its main clone, when
+			// both name each other (worktree.go).
+			if main, linked := linkedMainTree(dir); linked {
+				return foldCase(main), filepath.Base(main), true, nil
+			}
 			return foldCase(dir), filepath.Base(dir), true, nil
 		}
 		parent := filepath.Dir(dir)

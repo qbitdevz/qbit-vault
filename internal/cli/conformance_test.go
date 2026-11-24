@@ -39,7 +39,16 @@ func TestContractConformance(t *testing.T) {
 		{"capabilities", "capabilities", "", w.outside, nil, ""},
 		{"list outside", "list", "", w.outside, nil, ""},
 		{"list in repo", "list", "", w.repo, nil, ""},
+		{"list with locale", "list", `"locale":"es-ES"`, w.outside, nil, ""},
+		{"list with an unknown locale", "list", `"locale":"tlh-Kore-XX"`, w.outside, nil, ""},
+		{"list with a locale of the wrong type", "list", `"locale":5`, w.outside, nil, "internal"},
 		{"exec", "exec", `"command":` + jsonString(exe) + `,"secrets":[{"name":"TOKEN","from":"A"}],"timeout_ms":60000,"shell":"auto"`, w.outside, nil, ""},
+		{"check", "check", `"names":["A"]`, w.outside, nil, ""},
+		{"check with locale", "check", `"names":["A"],"locale":"es-ES"`, w.outside, nil, ""},
+		{"check no grant", "check", `"names":["P"]`, w.repo, nil, "grant_required"},
+		{"check unknown", "check", `"names":["NOPE"]`, w.outside, nil, "unknown_secret"},
+		{"check bad name", "check", `"names":["bad"]`, w.outside, nil, "invalid_name"},
+		{"check without names", "check", `"names":[]`, w.outside, nil, "internal"},
 		{"exec no grant", "exec", `"command":"x","secrets":[{"name":"P"}]`, w.repo, nil, "grant_required"},
 		{"exec unknown", "exec", `"command":"x","secrets":[{"name":"NOPE"}]`, w.outside, nil, "unknown_secret"},
 		{"exec dump", "exec", `"command":"env","secrets":[{"name":"A"}]`, w.outside, nil, "dump_command"},
@@ -47,6 +56,8 @@ func TestContractConformance(t *testing.T) {
 		{"request fields", "request", `"fields":[{"name":"F_HOST","kind":"text","label":"Host"},{"name":"F_PASS"}],"reason":"run the migrations now"`, w.outside, []prompttest.Answer{val("h.internal"), val("TESTSECRET_conf_f"), pick(0)}, ""},
 		{"request declined", "request", `"name":"DECL","reason":"deploy the shop api now"`, w.outside, []prompttest.Answer{val("TESTSECRET_conf_d"), pick(1)}, "user_declined"},
 		{"request cooldown", "request", `"name":"DECL","reason":"deploy the shop api now"`, w.outside, nil, "rate_limited"},
+		{"request with locale", "request", `"name":"LOC_ONE","reason":"deploy the shop api now","suggested_scope":"once","locale":"es"`, w.outside, []prompttest.Answer{val("TESTSECRET_conf_loc"), pick(0)}, ""},
+		{"manage with locale", "manage", `"action":"remove","name":"LOC_ONE","layer":"global","reason":"no longer used by anything","locale":"es-AR"`, w.outside, []prompttest.Answer{yes()}, ""},
 		{"request three words", "request", `"name":"A","reason":"need it now"`, w.outside, []prompttest.Answer{pick(0)}, ""},
 		{"request too vague", "request", `"name":"A","reason":"needed!!"`, w.outside, nil, "reason_too_vague"},
 		{"request bad name", "request", `"name":"bad","reason":"deploy the shop api now"`, w.outside, nil, "invalid_name"},
@@ -78,8 +89,13 @@ func TestContractConformance(t *testing.T) {
 		_ = json.Unmarshal([]byte(out), &m)
 		got := ""
 		if def == "refusal" {
-			got = m["refusal"].(map[string]any)["type"].(string)
+			rf := m["refusal"].(map[string]any)
+			got = rf["type"].(string)
 			seen[got] = true
+			// S4 of odd/tasks/actionable-refusals.md: every refusal says what to do next.
+			if h, _ := rf["hint"].(string); h == "" {
+				t.Errorf("%s: %s has no hint: %s", s.name, got, out)
+			}
 		}
 		if got != s.want {
 			t.Errorf("%s: got %q want %q: %s", s.name, got, s.want, out)
@@ -96,6 +112,14 @@ func TestContractConformance(t *testing.T) {
 	sort.Strings(schema)
 	if !reflect.DeepEqual(code, schema) {
 		t.Fatalf("refusal types drifted:\ncode   %v\nschema %v", code, schema)
+	}
+	// The same for the dump_command rules (CONTRACT.md § Refusals).
+	var rules []string
+	for _, r := range refusal.Rules() {
+		rules = append(rules, string(r))
+	}
+	if got := sch.RefusalRules(); !reflect.DeepEqual(rules, got) {
+		t.Fatalf("dump_command rules drifted:\ncode   %v\nschema %v", rules, got)
 	}
 	t.Logf("refusal types exercised: %s", strings.Join(keys(seen), ", "))
 }

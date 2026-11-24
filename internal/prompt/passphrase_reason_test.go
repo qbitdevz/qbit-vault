@@ -3,6 +3,8 @@ package prompt
 import (
 	"strings"
 	"testing"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 const unlockReason = "Claude Code wants to use A. Unlock the vault to continue."
@@ -12,14 +14,14 @@ const unlockReason = "Claude Code wants to use A. Unlock the vault to continue."
 func TestPassphraseReasonIsShownAboveTheEntry(t *testing.T) {
 	req := VaultPassphrase
 	req.Reason = unlockReason
-	d := passphraseDialog(req, false)
+	d := passphraseDialog(i18n.En, req, false)
 	if d.heading != "Vault passphrase" || d.text != unlockReason+"\n\nVault passphrase:" {
 		t.Fatalf("heading=%q text=%q", d.heading, d.text)
 	}
-	if again := passphraseDialog(req.Twice(), true); strings.Contains(again.text, "Claude Code") {
+	if again := passphraseDialog(i18n.En, req.Twice(), true); strings.Contains(again.text, "Claude Code") {
 		t.Fatalf("the second entry repeats the reason: %q", again.text)
 	}
-	if plain := passphraseDialog(VaultPassphrase, false); plain.text != "Vault passphrase:" {
+	if plain := passphraseDialog(i18n.En, VaultPassphrase, false); plain.text != "Vault passphrase:" {
 		t.Fatalf("a dialog without a reason changed: %q", plain.text)
 	}
 }
@@ -27,7 +29,7 @@ func TestPassphraseReasonIsShownAboveTheEntry(t *testing.T) {
 func TestPassphraseReasonIsEscapedInDialogAndTerminal(t *testing.T) {
 	req := VaultPassphrase
 	req.Reason = "Evil\x1b[2J wants to use A. Unlock the vault to continue."
-	if d := passphraseDialog(req, false); strings.ContainsRune(d.text, 0x1b) {
+	if d := passphraseDialog(i18n.En, req, false); strings.ContainsRune(d.text, 0x1b) {
 		t.Fatalf("control character in the dialog: %q", d.text)
 	}
 	b, term := backendOf(fxPass)

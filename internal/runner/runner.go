@@ -86,6 +86,10 @@ type Spec struct {
 	// CaptureLimit caps each captured stream, keeping the tail; zero means
 	// DefaultCaptureLimit.
 	CaptureLimit int
+	// OnStart, when set, is called once, from the goroutine that called Run,
+	// right after the child exists and is in its process tree and before Run
+	// waits for it. It is not called when the command cannot start.
+	OnStart func()
 }
 
 // Result is what a run produced. Stdout and Stderr hold redacted output in
@@ -183,6 +187,9 @@ func Run(ctx context.Context, s Spec) (Result, error) {
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	if s.OnStart != nil {
+		s.OnStart()
+	}
 	var timeout <-chan time.Time
 	if s.Timeout > 0 {
 		timer := time.NewTimer(s.Timeout)

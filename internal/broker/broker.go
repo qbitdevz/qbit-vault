@@ -27,14 +27,39 @@ const (
 	// Contract is the only contract this broker speaks.
 	Contract = "qbit-vault.secrets-broker/v1"
 	// Capabilities is the capability version (CONTRACT.md header).
-	Capabilities = "1.0"
+	Capabilities = "1.1"
+	// RefusalHints is the capability row for the optional refusal fields
+	// `hint`, `rule` and `segment` (CONTRACT.md § Refusals).
+	RefusalHints = 1
+	// ExecJobs is the capability row for the job ops of the MCP server
+	// (exec_start, exec_status, exec_stop; CONTRACT.md § Jobs). It is reported
+	// only by a backend that serves them.
+	ExecJobs = 1
+	// MaxWaitMS is the longest `exec_status` long poll: under the 60 s some
+	// hosts allow a tool call.
+	MaxWaitMS = 50000
+	// JobIDLen is the length of a job id: 128 random bits as lowercase hex.
+	JobIDLen = 32
+	// DialogLocale is the capability row for the optional `locale` field of
+	// request, list, exec and manage (CONTRACT.md § Dialog language).
+	DialogLocale = 1
+	// SecretCheck is the capability row for the `check` op (CONTRACT.md § check).
+	SecretCheck = 1
+	// ValueRevert is the capability row for the `revert` action of manage and
+	// the optional `previous_until` of list (CONTRACT.md § Previous value).
+	ValueRevert = 1
+	// LastUse is the capability row for the optional last_used_at,
+	// last_exit_code and last_ok_at of list (CONTRACT.md § Last use).
+	LastUse = 1
 	// MaxRequestBytes bounds one request.
 	MaxRequestBytes = 64 << 10
 
-	maxCommandBytes = 16 << 10
-	maxExecSecrets  = 16
-	minTimeoutMS    = 1000
-	maxTimeoutMS    = 3600000
+	// MaxCommandBytes, MaxExecSecrets, MinTimeoutMS and MaxTimeoutMS are the
+	// `exec` limits of the wire schema; the MCP tool schema repeats them.
+	MaxCommandBytes = 16 << 10
+	MaxExecSecrets  = 16
+	MinTimeoutMS    = 1000
+	MaxTimeoutMS    = 3600000
 	defTimeoutMS    = 600000
 	minTTLMS        = 60000
 	maxTTLMS        = 86400000
@@ -64,20 +89,24 @@ const (
 )
 
 var (
-	ops       = []string{"request", "list", "exec", "manage", "grant", "revoke", "capabilities"}
-	opFields  = map[string][]string{"request": {"name", "fields", "reason", "suggested_scope", "suggested_layer"}, "list": nil, "exec": {"command", "secrets", "timeout_ms", "shell"}, "manage": {"action", "name", "layer", "reason", "to", "changes"}, "grant": {"name", "layer", "scope", "ttl_ms", "prompt_token"}, "revoke": {"name", "all", "session_only"}, "capabilities": nil}
+	ops = []string{"request", "list", "exec", "manage", "check", "grant", "revoke", "capabilities"}
+	// jobOps are accepted only by a backend that implements JobBackend; they
+	// are not in `ops`, which lists what every transport serves.
+	jobOps    = []string{"exec_start", "exec_status", "exec_stop"}
+	jobIDRE   = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	opFields  = map[string][]string{"exec_start": {"command", "secrets", "timeout_ms", "shell", "locale"}, "exec_status": {"job", "wait_ms"}, "exec_stop": {"job"}, "request": {"name", "fields", "reason", "suggested_scope", "suggested_layer", "locale"}, "list": {"locale"}, "check": {"names", "locale"}, "exec": {"command", "secrets", "timeout_ms", "shell", "locale"}, "manage": {"action", "name", "layer", "reason", "to", "changes", "locale"}, "grant": {"name", "layer", "scope", "ttl_ms", "prompt_token"}, "revoke": {"name", "all", "session_only"}, "capabilities": nil}
 	envFields = []string{"contract", "op", "v", "session", "cwd", "host"}
 	sessionRE = regexp.MustCompile(`^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$`)
 	nameRE    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 	scopes    = []string{"once", "session", "project"}
 	layers    = []string{"global", "project"}
 	shells    = []string{"auto", "sh", "bash", "cmd", "pwsh"}
-	actions   = []string{"remove", "edit", "move", "replace"}
+	actions   = []string{"remove", "edit", "move", "replace", "revert"}
 )
 
 // invalid is the refusal for a request that fails validation (L3).
 func invalid(field string) refusal.Refusal {
-	return refusal.New(refusal.Internal, "").WithMessage("invalid request: " + field)
+	return refusal.New(refusal.Internal, "").WithMessage("invalid request: " + field).WithHint(refusal.HintBadRequest)
 }
 
 var errMismatch = refusal.New(refusal.ContractMismatch, "")
@@ -142,7 +171,7 @@ func handle(ctx context.Context, raw []byte, b Backend, t Transport) (any, error
 	if !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) || json.Unmarshal(raw, &m) != nil || m == nil {
 		return nil, invalid("not a JSON object")
 	}
-	e, err := envelope(m)
+	e, err := envelope(m, b)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +206,40 @@ func dispatch(ctx context.Context, e Envelope, m fields, b Backend, t Transport)
 			return nil, err
 		}
 		return b.Exec(ctx, e, r)
+	case "check":
+		r, err := checkRequest(m)
+		if err != nil {
+			return nil, err
+		}
+		res, err := b.Check(ctx, e, r)
+		if err != nil {
+			return nil, err
+		}
+		if res.Results == nil {
+			res.Results = []CheckResult{}
+		}
+		for i := range res.Results {
+			if res.Results[i].SameAs == nil {
+				res.Results[i].SameAs = []string{}
+			}
+		}
+		res.OK = true
+		return res, nil
+	case "exec_start":
+		r, err := execRequest(m)
+		if err != nil {
+			return nil, err
+		}
+		return b.(JobBackend).ExecStart(ctx, e, r)
+	case "exec_status", "exec_stop":
+		r, err := jobRequest(m, e.Op == "exec_status")
+		if err != nil {
+			return nil, err
+		}
+		if e.Op == "exec_status" {
+			return b.(JobBackend).ExecStatus(ctx, e, r)
+		}
+		return b.(JobBackend).ExecStop(ctx, e, r)
 	case "grant":
 		if t == TransportModel {
 			return nil, refusal.New(refusal.NotModelCallable, "")
@@ -208,7 +271,7 @@ func dispatch(ctx context.Context, e Envelope, m fields, b Backend, t Transport)
 	return nil, invalid("op")
 }
 
-func envelope(m fields) (Envelope, error) {
+func envelope(m fields, b Backend) (Envelope, error) {
 	var e Envelope
 	if str(m, "contract", &e.Contract) != nil || e.Contract != Contract {
 		return e, errMismatch
@@ -216,7 +279,7 @@ func envelope(m fields) (Envelope, error) {
 	if num(m, "v", &e.V) != nil || e.V != 1 {
 		return e, errMismatch
 	}
-	if str(m, "op", &e.Op) != nil || !in(e.Op, ops) {
+	if str(m, "op", &e.Op) != nil || !(in(e.Op, ops) || (in(e.Op, jobOps) && isJobBackend(b))) {
 		return e, invalid("op")
 	}
 	allowed := append(append([]string(nil), envFields...), opFields[e.Op]...)
@@ -238,7 +301,19 @@ func envelope(m fields) (Envelope, error) {
 		}
 		e.Host = h
 	}
+	if raw, ok := m["locale"]; ok {
+		// Only the ops that open a dialog list it (opFields). Any string goes
+		// through; whoever resolves it ignores what names no language.
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || str(m, "locale", &e.Locale) != nil {
+			return e, invalid("locale")
+		}
+	}
 	return e, nil
+}
+
+func isJobBackend(b Backend) bool {
+	_, ok := b.(JobBackend)
+	return ok
 }
 
 func capabilities(info Info) any {
@@ -254,22 +329,32 @@ func capabilities(info Info) any {
 		Keychain       string   `json:"keychain"`
 		Streaming      bool     `json:"streaming"`
 		Sync           bool     `json:"sync"`
+		RefusalHints   int      `json:"refusal_hints"`
+		DialogLocale   int      `json:"dialog_locale"`
+		SecretCheck    int      `json:"secret_check"`
+		ValueRevert    int      `json:"value_revert"`
+		LastUse        int      `json:"last_use"`
+		ExecJobs       int      `json:"exec_jobs,omitempty"`
 	}
 	pb := info.PromptBackends
 	if pb == nil {
 		pb = []string{}
 	}
-	return caps{OK: true, Contract: Contract, Capabilities: Capabilities, Ops: ops, Layers: layers,
-		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming}
+	c := caps{OK: true, Contract: Contract, Capabilities: Capabilities, Ops: ops, Layers: layers,
+		PromptBackends: pb, FieldKinds: FieldKinds, MaxFields: MaxFields, Keychain: info.Keychain, Streaming: info.Streaming, RefusalHints: RefusalHints, DialogLocale: DialogLocale, SecretCheck: SecretCheck, ValueRevert: ValueRevert, LastUse: LastUse}
+	if info.ExecJobs {
+		c.ExecJobs = ExecJobs
+	}
+	return c
 }
 
 func execRequest(m fields) (ExecRequest, error) {
 	r := ExecRequest{TimeoutMS: defTimeoutMS, Shell: "auto"}
-	if str(m, "command", &r.Command) != nil || strings.TrimSpace(r.Command) == "" || len(r.Command) > maxCommandBytes {
+	if str(m, "command", &r.Command) != nil || strings.TrimSpace(r.Command) == "" || len(r.Command) > MaxCommandBytes {
 		return r, invalid("command")
 	}
 	raw, ok := m["secrets"]
-	if !ok || strict(raw, &r.Secrets) != nil || len(r.Secrets) == 0 || len(r.Secrets) > maxExecSecrets {
+	if !ok || strict(raw, &r.Secrets) != nil || len(r.Secrets) == 0 || len(r.Secrets) > MaxExecSecrets {
 		return r, invalid("secrets")
 	}
 	seen := map[string]bool{}
@@ -286,13 +371,49 @@ func execRequest(m fields) (ExecRequest, error) {
 		seen[s.Name] = true
 	}
 	if _, ok := m["timeout_ms"]; ok {
-		if num(m, "timeout_ms", &r.TimeoutMS) != nil || r.TimeoutMS < minTimeoutMS || r.TimeoutMS > maxTimeoutMS {
+		if num(m, "timeout_ms", &r.TimeoutMS) != nil || r.TimeoutMS < MinTimeoutMS || r.TimeoutMS > MaxTimeoutMS {
 			return r, invalid("timeout_ms")
 		}
 	}
 	if _, ok := m["shell"]; ok {
 		if str(m, "shell", &r.Shell) != nil || !in(r.Shell, shells) {
 			return r, invalid("shell")
+		}
+	}
+	return r, nil
+}
+
+// checkRequest validates `check`: the names are exec's (1 to MaxExecSecrets,
+// each valid, none twice), with no `from` and no other input: the request
+// carries no place for a value.
+func checkRequest(m fields) (CheckRequest, error) {
+	var r CheckRequest
+	raw, ok := m["names"]
+	if !ok || strict(raw, &r.Names) != nil || len(r.Names) == 0 || len(r.Names) > MaxExecSecrets {
+		return r, invalid("names")
+	}
+	seen := map[string]bool{}
+	for _, n := range r.Names {
+		if !nameRE.MatchString(n) {
+			return r, refusal.New(refusal.InvalidName, "")
+		}
+		if seen[n] {
+			return r, invalid("names")
+		}
+		seen[n] = true
+	}
+	return r, nil
+}
+
+// jobRequest validates exec_status (with its long poll) and exec_stop.
+func jobRequest(m fields, status bool) (JobRequest, error) {
+	var r JobRequest
+	if str(m, "job", &r.Job) != nil || !jobIDRE.MatchString(r.Job) {
+		return r, invalid("job")
+	}
+	if _, ok := m["wait_ms"]; ok {
+		if !status || num(m, "wait_ms", &r.WaitMS) != nil || r.WaitMS < 0 || r.WaitMS > MaxWaitMS {
+			return r, invalid("wait_ms")
 		}
 	}
 	return r, nil

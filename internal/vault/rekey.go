@@ -41,7 +41,9 @@ func Rekey(home string, oldKey, newKey secret.Secret) error {
 		if err := rekeyGrants(home, oldKey, newKey); err != nil {
 			return err
 		}
-		return rekeyRetired(home, oldKey, newKey)
+		err := rekeyRetired(home, oldKey, newKey)
+		rekeyUsage(home, oldKey, newKey) // best effort: only history
+		return err
 	})
 }
 

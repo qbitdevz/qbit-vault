@@ -15,6 +15,11 @@ type Segment struct {
 	// script marks `sh -c '...'` and `eval ...`: the script's own segments
 	// are listed separately, so this one is a transparent wrapper.
 	script bool
+
+	// top is the index of the top-level segment of the whole command that
+	// holds this one (itself, for a top-level segment), or -1 when it is not in
+	// one. Only the refusal's segment number reads it.
+	top int
 }
 
 // Segments splits cmd into simple commands. It splits on | || |& && ; & and
@@ -33,6 +38,7 @@ var keywords = map[string]bool{
 func segments(s string, depth int) []Segment {
 	var (
 		out, sub []Segment
+		subFrom  int // sub[subFrom:] was queued since the last segment ended
 		words    []string
 		cur      strings.Builder
 		inWord   bool
@@ -67,9 +73,13 @@ func segments(s string, depth int) []Segment {
 		}
 		if len(words) == 0 {
 			words = nil
+			for j := subFrom; j < len(sub); j++ {
+				sub[j].top = -1
+			}
+			subFrom = len(sub)
 			return
 		}
-		seg := Segment{Words: words, Text: strings.Join(words, " ")}
+		seg := Segment{Words: words, Text: strings.Join(words, " "), top: len(out)}
 		if script, ok := scriptOf(words); ok {
 			seg.script = true
 			if depth < maxDepth {
@@ -78,6 +88,10 @@ func segments(s string, depth int) []Segment {
 				sub = append(sub, flat(script))
 			}
 		}
+		for j := subFrom; j < len(sub); j++ {
+			sub[j].top = len(out)
+		}
+		subFrom = len(sub)
 		out = append(out, seg)
 		words = nil
 	}
@@ -208,7 +222,7 @@ func segments(s string, depth int) []Segment {
 // flat is the segment of text too deeply nested to follow.
 func flat(s string) Segment {
 	w := strings.Fields(s)
-	return Segment{Words: w, Text: strings.Join(w, " ")}
+	return Segment{Words: w, Text: strings.Join(w, " "), top: -1}
 }
 
 // redirect reports whether an unquoted word is an output redirection

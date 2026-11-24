@@ -276,3 +276,50 @@ func TestResolvedConflictsStayResolved(t *testing.T) {
 		t.Fatalf("no base: %d", len(m.Conflicts))
 	}
 }
+
+// previousRec is a record with a previous value, as schema 2 stores it
+// (STORAGE.md § Previous value). The merge never interprets the field.
+func previousRec(value, prev, h string) Record {
+	r := rec(value, h)
+	r["previous"] = json.RawMessage(`{"value":"` + prev + `","replaced_at":"2026-11-04T12:00:00Z"}`)
+	return r
+}
+
+func previousOf(r Record) string {
+	var p struct {
+		Value string `json:"value"`
+	}
+	_ = json.Unmarshal(r["previous"], &p)
+	return p.Value
+}
+
+// Two devices replace the same secret: the newer replace wins whole, so its
+// previous value (what that device replaced) wins with it, and the losing
+// replace is kept in conflicts with its own previous value.
+func TestConflictingReplacesKeepThePreviousValueOfTheWinner(t *testing.T) {
+	base, local, rem := body(), body(), body()
+	b1 := hlc(1, "a")
+	base.Global["A"] = rec("v1", b1)
+	local.Global["A"] = previousRec("loc", "v1", hlc(5, "a"))
+	rem.Global["A"] = previousRec("rem", "v1", hlc(9, "b"))
+	out := Merge(base, local, rem, "a", now)
+	if val(t, out, "A") != "rem" || previousOf(out.Global["A"]) != "v1" {
+		t.Fatalf("winner = %s previous %q", val(t, out, "A"), previousOf(out.Global["A"]))
+	}
+	if len(out.Conflicts) != 1 || previousOf(out.Conflicts[0].Record) != "v1" {
+		t.Fatalf("losing replace was not kept with its previous value: %+v", out.Conflicts)
+	}
+}
+
+// A record only one side changed travels whole, unknown fields included.
+func TestOneSidedReplaceCarriesThePreviousValue(t *testing.T) {
+	base, local, rem := body(), body(), body()
+	b1 := hlc(1, "a")
+	base.Global["A"] = rec("v1", b1)
+	local.Global["A"] = rec("v1", b1)
+	rem.Global["A"] = previousRec("v2", "v1", hlc(5, "b"))
+	out := Merge(base, local, rem, "a", now)
+	if val(t, out, "A") != "v2" || previousOf(out.Global["A"]) != "v1" {
+		t.Fatalf("remote replace lost its previous value: %q", previousOf(out.Global["A"]))
+	}
+}

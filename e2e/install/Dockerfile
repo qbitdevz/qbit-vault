@@ -33,6 +33,7 @@ ENV HOME=/home/qbv/fresh \
     XDG_RUNTIME_DIR=/dev/shm/qbv-run \
     QBIT_VAULT_HOME=/home/qbv/vault \
     QBIT_VAULT_PROMPT=scripted \
+    QBIT_VAULT_LOCALE=en \
     QBIT_VAULT_SCRIPTED_PASSPHRASE_FILE=/home/qbv/passphrase \
     QBIT_VAULT_SCRIPTED_ANSWERS=/home/qbv/answers \
     QBIT_VAULT_SCRIPTED_TRANSCRIPT=/home/qbv/transcript

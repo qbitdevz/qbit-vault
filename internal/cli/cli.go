@@ -46,6 +46,14 @@ type globals struct {
 	// ctx, when set, is the call this command serves (an MCP request the
 	// client may cancel): its dialogs end with it. Nil is the CLI.
 	ctx context.Context
+	// dialogLocale is the raw locale tag of the agent call this command serves
+	// (the envelope's `locale`); "" for the CLI. It is only ever resolved by
+	// loc and never shown, logged or audited.
+	dialogLocale string
+	// searched is the human-only note of an unknown_secret that exec raised:
+	// which layers were searched (issue #64). It holds a project label, so it
+	// is printed on the terminal only, never in a refusal, JSON or the audit.
+	searched string
 	// unlock is what an agent call tells the passphrase dialog it may open
 	// (agentunlock.go); the zero value asks for the vault with no name.
 	unlock  agentUnlock
@@ -125,7 +133,11 @@ func execute(args []string, stdout, stderr io.Writer, getenv func(string) string
 	case errors.As(err, &ue):
 		return report(stdout, stderr, asJSON, "usage", ue.msg, exitcode.Usage)
 	case errors.As(err, &rf):
-		code = reportRefusal(stdout, stderr, asJSON, rf)
+		shown := rf
+		if rf.Type == refusal.UnknownSecret && !asJSON {
+			shown = rf.WithMessage(rf.Message + g.searched)
+		}
+		code = reportRefusal(stdout, stderr, asJSON, shown)
 		g.recordRefusal(stderr, rf)
 		return code
 	case errors.As(err, &ce):
@@ -200,7 +212,7 @@ func newRoot(g *globals, entered *bool) *cobra.Command {
 		SilenceErrors: true,
 		PersistentPreRunE: func(*cobra.Command, []string) error {
 			if g.Session != "" && !sessionRE.MatchString(g.Session) {
-				return usageError{"invalid --session: must match " + sessionRE.String()}
+				return usageError{"invalid --session: use <host>:<id> matching " + sessionRE.String() + ", the id the host gives its own session (see 'qbit-vault exec --help')"}
 			}
 			*entered = true
 			return nil
@@ -233,7 +245,7 @@ func newRoot(g *globals, entered *bool) *cobra.Command {
 
 	root.AddCommand(newVersion(g))
 	root.AddCommand(newInit(g), newSync(g), newUninstall(g), newDoctor(g))
-	root.AddCommand(newSet(g), newRm(g), newDescribe(g), newEdit(g), newList(g), newMv(g), newRelink(g))
+	root.AddCommand(newSet(g), newRm(g), newRevert(g), newDescribe(g), newEdit(g), newList(g), newMv(g), newRelink(g))
 	root.AddCommand(newGrant(g), newRevoke(g), newGrantsList(g))
 	root.AddCommand(newAudit(g))
 	root.AddCommand(newExec(g))

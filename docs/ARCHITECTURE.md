@@ -30,7 +30,8 @@
 │  internal/audit       hash-chained JSONL                                      │
 │  internal/minisign    Minisign ED verifier + pinned release key (embedded)    │
 │  (tools/release-sign: release signer, not in the binary)                      │
-│  internal/mcp         stdio MCP server over the broker                        │
+│  internal/mcp         stdio MCP server over the broker, and the in-memory job │
+│                       registry behind secret_exec_start/status/stop (jobs.go) │
 │  internal/hook        Claude Code hook handlers (scan, redact, block)         │
 │  internal/hosts       Adapter interface, step runner, receipts; adapters in   │
 │                       hosts/claude, hosts/codex, hosts/pi (hosts/fake: tests) │
@@ -72,8 +73,8 @@ Two rules shape everything:
 
 ## Process model
 
-- No daemon. Every host operation is a fresh `qbit-vault` process (CLI) or a long-lived stdio MCP server **started and owned by the host** (one per host session). Both are stateless apart from the files in `$QBIT_VAULT_HOME`.
-- Session identity: the caller passes `--session <id>` (`^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$`, or `QBIT_VAULT_SESSION`). The MCP server uses `QBIT_VAULT_SESSION` when set and otherwise generates `mcp:<16 hex>` for its lifetime. The Pi extension passes `pi:<id>` to the commands that take `--session`. The hooks do not take part in grants. Grants are keyed by it.
+- No daemon. Every host operation is a fresh `qbit-vault` process (CLI) or a long-lived stdio MCP server **started and owned by the host** (one per host session). Both are stateless apart from the files in `$QBIT_VAULT_HOME`, with one exception that is not a daemon: the MCP server keeps the **jobs** its host started with `secret_exec_start` in its own memory (below), because a host cancels a tool call that runs past its request timeout (issue #64). A job is a child of that one server process, owned by the host session that started it, and ends with it; there is no process of ours that outlives the host session, no socket, no job file and no lifecycle to manage.
+- Session identity: the caller passes `--session <id>` (`^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$`, or `QBIT_VAULT_SESSION`). The MCP server uses `QBIT_VAULT_SESSION` when set and otherwise generates `mcp:<16 hex>` for its lifetime. The Pi extension passes `pi:<id>` to the commands that take `--session`. The hooks do not take part in grants. `once` and `session` grants are keyed by it; `qbit-vault exec` may be run without one (issue #64), and then only `project` grants, which are keyed by the repository, apply.
 - Keychain unlock happens per process; the OS caches it. In passphrase mode the unlocked key is cached with a TTL only in a `0600` file under `$XDG_RUNTIME_DIR` (tmpfs on Linux), so the user is not asked on every exec; where no such memory-backed directory exists there is no cache and the passphrase is asked on each unlock.
 
 ## Data flows
@@ -183,6 +184,25 @@ desktop (later): agent calls secret_list → broker pulls (If-None-Match 41) →
 
 The model calls `secret_exec(command, secrets)` directly. Inside qbit-vault the behavior is that of Flow B's `exec`. This is the path every host uses today. OpenCode is not supported (dropped, `ROADMAP.md`).
 
+#### Jobs: commands that outlast a tool call (issue #64)
+
+`secret_exec` runs its command inside the tool call, so a host that cancels the call at its request timeout (60 s in some) ends the command. For longer commands the server has three more tools, all handled by `internal/mcp/jobs.go` (`Jobs`) over the same broker:
+
+```
+model ── secret_exec_start ──▶ broker.Handle ──▶ Jobs.ExecStart
+                                   │             1. take one of 4 slots (a fifth start is refused here)
+                                   │             2. cliBackend.PrepareExec = the first half of exec:
+                                   │                unlock dialog, grants (a once grant is claimed), dump guard,
+                                   │                binary rules, redactor, 'started' audit record
+                                   │             3. go: PreparedExec.Run = the second half of exec:
+                                   │                runner.Run (tree kill, timeout), redactor → job buffer
+                                   │             4. answer {job} once OnStart fired (the child exists)
+model ── secret_exec_status ─▶ ... ──▶ Jobs.ExecStatus   long poll on the job; takes the output since the last call
+model ── secret_exec_stop ───▶ ... ──▶ Jobs.ExecStop     cancels the run context: the tree is killed
+```
+
+`qbit-vault exec`, the contract's `exec` and a job share one implementation of steps 1 to 7 and of the run (`prepareExec`, `execRun.run` and `execRun.close` in `internal/cli/exec.go`), so a fix to the guard, the grants, the injection, the redaction or the audit applies to all of them; the differential check of T6 (`odd/tasks/issues-61-65-dialogs.md` L11) compared the CLI and MCP `exec` before and after the split. The registry holds, per job, the id (128 random bits), the owning MCP session, the run context, the state and the redacted output not yet reported (each stream capped at 1 MiB). Output is redacted by the runner's `redact.StreamWriter` *before* it reaches that buffer. It is dropped when a status or stop call returns the final state, or 10 minutes after the job ended. `Jobs.Shutdown`, deferred in `qbit-vault mcp`, kills every job's tree when the server ends, and the end of an MCP session kills that session's jobs. `broker --op` does not serve the job ops (it is one process per call).
+
 ## Implicit binding table
 
 **Planned, not built.** `defaults/bindings.yaml` exists as the default table, but nothing loads it yet: no `bindings.yaml` is created in the vault home and neither `exec` nor the hooks read one (and `doctor` does not validate it). The design: to keep usage natural ("run gh" instead of "run gh with GITHUB_TOKEN"), the extension and hooks would consult a data file `bindings.yaml` mapping well-known binaries to the env vars they read:
@@ -227,14 +247,14 @@ Every host adapter edits the user's own files (`~/.claude/settings.json`, `~/.co
 | # | Decision | Alternatives rejected | Why |
 | --- | --- | --- | --- |
 | D1 | Go core | TypeScript core | Single static binary, no runtime for Claude Code or Codex users, easy keychain bindings |
-| D2 | No daemon in v1 | Unix-socket broker daemon | Simpler threat surface, no lifecycle to manage on Windows; grants file gives the same cross-session behavior |
+| D2 | No daemon in v1 | Unix-socket broker daemon | Simpler threat surface, no lifecycle to manage on Windows; grants file gives the same cross-session behavior. Jobs (issue #64) are not a daemon: they live in the memory of the stdio MCP server the host already owns, die with it, and no process or file of ours outlives the host session |
 | D3 | Values via stdin / masked prompt, never argv | `set NAME VALUE` | Shell history and `ps` exposure |
 | D4 | Per-child env injection | Writing a temp `.env`, exporting to the shell | Temp files leak; exports outlive the command |
 | D5 | Grants are user-UI-only | Model-callable `secret_grant` | Prompt injection would grant itself |
 | D6 | Existence not disclosed to the model before consent | `secret_request` returning `exists: true` | Avoids enumeration by injected content |
 | D7 | XChaCha20-Poly1305 + Argon2id | AES-GCM, scrypt | Misuse-resistant nonces, memory-hard KDF, both in `x/crypto` |
 | D8 | Contract-first (`secrets-broker/v1`) | Ad-hoc tool schemas per host | Any host can integrate against a stable, versioned surface; identical behavior across hosts |
-| D9 | Four tools only (`request`, `list`, `exec`, `manage`) | Separate `secret_grant`, `secret_get`, `secret_policy`, one tool per management action | Smallest surface the model can misuse; `get` and `grant` must not exist; policy rides on `list` so the agent learns its rules in the call it makes anyway |
+| D9 | Five tools for the vault (`request`, `list`, `exec`, `manage`, `check`: the last one describes values by shape and equality and returns none, issue #62), plus three that only run and read a command (`exec_start`, `exec_status`, `exec_stop`, issue #64) | Separate `secret_grant`, `secret_get`, `secret_policy`, one tool per management action | Smallest surface the model can misuse; `get` and `grant` must not exist; policy rides on `list` so the agent learns its rules in the call it makes anyway |
 | D11 | Two layers, `global` and `project`, in one encrypted file | Per-project vault files; `.vault` file inside the repo; a per-secret `projects` allowlist | One file keeps project paths encrypted and writes atomic; nothing in the repo means nothing to commit by accident; overrides cover the real case (same name, different value per repo) that an allowlist cannot |
 | D12 | Agent management is propose-and-confirm | Agent mutates directly; agent read-only | Keeps invariant 6 (every change is an explicit user action) while letting the agent organize the vault |
 | D13 | Grants bind to (name, layer) | Grants bind to name only | Adding a project override must not silently inherit the global grant |

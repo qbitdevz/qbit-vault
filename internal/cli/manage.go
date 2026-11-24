@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/qbitdevz/qbit-vault/internal/audit"
 	"github.com/qbitdevz/qbit-vault/internal/broker"
 	"github.com/qbitdevz/qbit-vault/internal/grants"
 	"github.com/qbitdevz/qbit-vault/internal/prompt"
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 	"github.com/qbitdevz/qbit-vault/internal/refusal"
 	"github.com/qbitdevz/qbit-vault/internal/secret"
 	"github.com/qbitdevz/qbit-vault/internal/vault"
@@ -72,6 +74,7 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 	g := b.hot(e)
 	g.ctx = ctx
 	g.unlock = agentUnlock{names: []string{r.Name}, layer: r.Layer}
+	loc := g.loc()
 	s, err := g.openSession()
 	if err != nil {
 		return broker.ManageResponse{}, asRefusal(err)
@@ -102,7 +105,16 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 	rec := en.Record
 	diff := ""
 	if r.Action == "edit" {
-		diff = applyChanges(&rec, r.Changes)
+		diff = applyChanges(loc, &rec, r.Changes)
+	}
+	if r.Action == "revert" {
+		// Nothing to restore is answered before any dialog. diff carries the
+		// time the previous value was replaced, for the question only.
+		until, ok := en.Record.PreviousUntil()
+		if !ok {
+			return broker.ManageResponse{}, noPreviousValue(r.Name)
+		}
+		diff = replacedOnText(until)
 	}
 
 	ask, err := g.backend()
@@ -123,19 +135,19 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 		audited("declined")
 		return refusal.New(refusal.UserDeclined, r.Name)
 	}
-	q := manageQuestion(prompt.Requester(hostOf(e.Session), ""), r, en.Layer, to, targetExists, diff)
+	q := manageQuestion(loc, prompt.RequesterIn(loc, hostOf(e.Session), ""), r, en.Layer, to, targetExists, diff)
 	var (
 		ok         bool
 		grantScope grants.Scope // replace: the permission picked with it, if any
 	)
 	if r.Action == "replace" {
 		scopes := agentScopes(g.allowedScopes(r.Name, en.Layer, en.Record.Sensitive, scopeOrder))
-		_, def := scopeLabels(scopes, "", false)
+		_, def := scopeLabels(loc, scopes, "", false)
 		opts := make([]string, 0, len(scopes)+2)
 		for _, sc := range scopes {
-			opts = append(opts, replaceOption(sc))
+			opts = append(opts, replaceOption(loc, sc))
 		}
-		opts = append(opts, "Replace, but ask me before each use", "Don't replace")
+		opts = append(opts, loc.T("opt.replace_ask"), loc.T("opt.dont_replace"))
 		var i int
 		i, err = ask.Choose(q, opts, def)
 		ok = err == nil && i < len(opts)-1
@@ -167,6 +179,9 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 	case "move":
 		_, err = s.v.MoveWithGrants(r.Name, en.Layer, to, true, ed)
 		after = ptr(layerName(to))
+	case "revert":
+		_, err = s.v.RevertWithGrants(en.Layer, r.Name, ed)
+		after = ptr(layerName(en.Layer))
 	case "replace":
 		sec, aerr := ask.Secret(prompt.SecretRequest{Name: r.Name, Reason: r.Reason, Host: hostOf(e.Session),
 			Session: e.Session, Project: layerRequest(en.Layer), Existing: true})
@@ -186,7 +201,7 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 		if len(v) == 0 || len(v) > maxValueBytes {
 			return broker.ManageResponse{}, refusal.New(refusal.Internal, "").WithMessage("empty or too large value")
 		}
-		reviewed, rerr := reviewValue(ask, r.Name, v)
+		reviewed, rerr := reviewValue(ask, loc, r.Name, v)
 		if g.callGone() {
 			return broker.ManageResponse{}, errCallCancelled()
 		}
@@ -197,9 +212,26 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 			return broker.ManageResponse{}, refusal.New(refusal.Internal, "").WithMessage(msgNoPrompt)
 		}
 		defer clear(reviewed)
+		found, ferr := s.sameValues([]typedValue{{name: r.Name, layer: en.Layer, value: reviewed}})
+		if ferr != nil {
+			return broker.ManageResponse{}, asRefusal(mapErr(ferr, r.Name))
+		}
+		cerr := confirmSameValues(ask, loc, found)
+		if g.callGone() {
+			return broker.ManageResponse{}, errCallCancelled()
+		}
+		if cerr != nil {
+			if gaveUp(cerr) {
+				return broker.ManageResponse{}, declined()
+			}
+			return broker.ManageResponse{}, refusal.New(refusal.Internal, "").WithMessage(msgNoPrompt)
+		}
 		rec.Value = secret.New(r.Name, reviewed)
 		_, err = s.v.ReplaceWithGrants(en.Layer, r.Name, rec, ed)
 		after = ptr(layerName(en.Layer))
+	}
+	if errors.Is(err, vault.ErrNoPrevious) {
+		return broker.ManageResponse{}, noPreviousValue(r.Name) // it expired while the dialog was open
 	}
 	if err != nil {
 		return broker.ManageResponse{}, asRefusal(mapErr(err, r.Name))
@@ -216,6 +248,18 @@ func (b *cliBackend) Manage(ctx context.Context, e broker.Envelope, r broker.Man
 }
 
 func ptr(s string) *string { return &s }
+
+// noPreviousValue is the refusal of a revert with nothing to restore: the name
+// and fixed text only, never a value or a time.
+func noPreviousValue(name string) refusal.Refusal {
+	return refusal.New(refusal.Internal, "").WithMessage(name + " has no previous value to restore").WithHint(refusal.HintNoPreviousValue)
+}
+
+// replacedOnText is when a previous value was replaced, given the end of its
+// window, as the dialogs and the terminal show it.
+func replacedOnText(until time.Time) string {
+	return until.Add(-vault.PreviousRetention).UTC().Format("2006-01-02 15:04 UTC")
+}
 
 // grantReplaced creates the grant the user picked together with a replace,
 // on the new record, through the same prompt-token path as request.
@@ -237,11 +281,11 @@ func (g *globals) grantReplaced(s *session, name string, layer vault.Layer, sens
 
 // applyChanges edits rec and returns the before/after diff the user sees.
 // Clearing sensitive or emptying an allowlist widens access and is marked.
-func applyChanges(rec *vault.Record, c *broker.ManageChanges) string {
+func applyChanges(loc i18n.Locale, rec *vault.Record, c *broker.ManageChanges) string {
 	var parts []string
 	list := func(l []string) string {
 		if len(l) == 0 {
-			return "any"
+			return loc.T("diff.any")
 		}
 		return strings.Join(l, ",")
 	}
@@ -252,7 +296,7 @@ func applyChanges(rec *vault.Record, c *broker.ManageChanges) string {
 	if c.Sensitive != nil {
 		p := fmt.Sprintf("sensitive: %t -> %t", rec.Sensitive, *c.Sensitive)
 		if rec.Sensitive && !*c.Sensitive {
-			p += " (widening)"
+			p += loc.T("diff.widening")
 		}
 		parts = append(parts, p)
 		rec.Sensitive = *c.Sensitive
@@ -268,7 +312,7 @@ func applyChanges(rec *vault.Record, c *broker.ManageChanges) string {
 		next := cleanList(*f.next) // what is stored, so what the user is told
 		p := fmt.Sprintf("%s: %s -> %s", f.label, list(*f.cur), list(next))
 		if len(*f.cur) > 0 && len(next) == 0 {
-			p += " (widening)"
+			p += loc.T("diff.widening")
 		}
 		parts = append(parts, p)
 		*f.cur = next
@@ -276,31 +320,33 @@ func applyChanges(rec *vault.Record, c *broker.ManageChanges) string {
 	return strings.Join(parts, "; ")
 }
 
-func manageQuestion(who string, r broker.ManageRequest, from, to vault.Layer, targetExists bool, diff string) string {
+func manageQuestion(loc i18n.Locale, who string, r broker.ManageRequest, from, to vault.Layer, targetExists bool, diff string) string {
 	var what string
 	switch r.Action {
 	case "move":
-		what = fmt.Sprintf("move %s from %s to %s", r.Name, whereText(from), whereText(to))
+		what = loc.T("what.move", r.Name, whereText(loc, from), whereText(loc, to))
 		if targetExists {
-			what += " (overwriting the " + r.Name + " already there)"
+			what += loc.T("what.move_over", r.Name)
 		}
 	case "edit":
-		what = fmt.Sprintf("edit %s (%s): %s", r.Name, whereText(from), prompt.Escape(diff))
+		what = loc.T("what.edit", r.Name, whereText(loc, from), prompt.Escape(diff))
 	case "replace":
-		what = fmt.Sprintf("replace the value of %s (%s)", r.Name, whereText(from))
+		what = loc.T("what.replace", r.Name, whereText(loc, from))
+	case "revert":
+		what = loc.T("what.revert", r.Name, whereText(loc, from), diff) // diff: when the previous value was replaced
 	default:
-		what = fmt.Sprintf("remove %s (%s)", r.Name, whereText(from))
+		what = loc.T("what.remove", r.Name, whereText(loc, from))
 	}
-	return fmt.Sprintf("%s wants to %s.\nWhy: %s", who, what, prompt.Escape(r.Reason))
+	return loc.T("q.manage", who, what, prompt.Escape(r.Reason))
 }
 
 // replaceOption is the answer that replaces a value and also gives the agent
 // the permission to use it.
-func replaceOption(sc grants.Scope) string {
+func replaceOption(loc i18n.Locale, sc grants.Scope) string {
 	switch sc {
 	case grants.ScopeOnce:
-		return "Replace, allow once"
+		return loc.T("opt.replace_once")
 	default:
-		return "Replace, always in this project"
+		return loc.T("opt.replace_project")
 	}
 }

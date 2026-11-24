@@ -190,13 +190,15 @@ func mapErr(err error, name string) error {
 		return nil
 	case errors.Is(err, vault.ErrInvalidName):
 		return refusal.New(refusal.InvalidName, "")
+	case errors.Is(err, vault.ErrNoPrevious):
+		return noPreviousValue(name)
 	case errors.Is(err, vault.ErrNotFound):
 		return refusal.New(refusal.UnknownSecret, name)
 	case errors.Is(err, vault.ErrNoProject):
 		return refusal.New(refusal.NoProject, "")
 	case errors.Is(err, vault.ErrLocked):
 		// Until the contract has a dedicated type.
-		return refusal.New(refusal.Internal, "").WithMessage("vault is busy").WithRetryable(true)
+		return refusal.New(refusal.Internal, "").WithMessage("vault is busy").WithRetryable(true).WithHint(refusal.HintBusy)
 	case errors.Is(err, prompt.ErrCancelled):
 		return errCancelled
 	case errors.Is(err, prompt.ErrTimeout):

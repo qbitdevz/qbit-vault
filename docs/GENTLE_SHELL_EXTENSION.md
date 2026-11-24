@@ -2,7 +2,7 @@
 
 **Status: built (Phase 4 v1), distributed as a git tag, not on npm.** The package lives in `packages/qbit-vault-pi`, is tested in CI (`pi-extension` job) and is published by the maintainer running the `pi-extension-release` workflow, which pushes the immutable tag `pi-v<version>`. The install commands below work once that tag exists. `qbit-vault init` and `sync` print them as a suggestion when the Pi host is registered, and never run them.
 
-The extension adds what MCP cannot: commands the user runs without the model, a vault status in the footer, paste interception so a token typed or pasted into the chat never reaches the model, and (since 0.2.0) an output and write guard on the built-in tools. The four MCP tools (`secret_request`, `secret_list`, `secret_exec`, `secret_manage`), the native dialogs and `exec` redaction stay exactly as they are; the extension does not register tools of its own.
+The extension adds what MCP cannot: commands the user runs without the model, a vault status in the footer, paste interception so a token typed or pasted into the chat never reaches the model, and (since 0.2.0) an output and write guard on the built-in tools. The MCP tools (`secret_request`, `secret_list`, `secret_exec`, `secret_manage` and the job tools `secret_exec_start`, `secret_exec_status`, `secret_exec_stop`), the native dialogs and `exec` redaction stay exactly as they are; the extension does not register tools of its own.
 
 It is written in TypeScript against the Pi extension API and peer-depends on `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui` and `typebox` (never bundled). Dev dependencies are `typescript`, `vitest` and the Pi packages (for types only).
 

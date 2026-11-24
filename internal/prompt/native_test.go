@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // hostile is text a requester could put in a reason or a name to break out of
@@ -67,7 +69,7 @@ func TestPSStringCannotBreakOut(t *testing.T) {
 
 func psTool(t *testing.T) (powershellTool, command) {
 	t.Helper()
-	d := secretDialog(req)
+	d := secretDialog(i18n.En, req)
 	return powershellTool{}, powershellTool{}.build("powershell.exe", d)
 }
 
@@ -92,7 +94,7 @@ func TestPowerShellCommandShape(t *testing.T) {
 			t.Errorf("script holds %q outside a data literal", leak)
 		}
 	}
-	if !strings.Contains(s, psString(secretDialog(req).title)) || !strings.Contains(s, psString(secretDialog(req).tail)) {
+	if !strings.Contains(s, psString(secretDialog(i18n.En, req).title)) || !strings.Contains(s, psString(secretDialog(i18n.En, req).tail)) {
 		t.Error("script lacks the title or the text literal")
 	}
 }
@@ -102,9 +104,9 @@ func TestPowerShellScriptsAreASCII(t *testing.T) {
 	// may be in it, whatever the request holds.
 	for _, tt := range hostile {
 		for _, d := range []dialog{
-			secretDialog(SecretRequest{Name: "N", Reason: tt.in, Host: tt.in, Session: tt.in, Project: tt.in}),
-			chooseDialog(tt.in, []string{tt.in, "b"}, 0),
-			confirmDialog(tt.in),
+			secretDialog(i18n.En, SecretRequest{Name: "N", Reason: tt.in, Host: tt.in, Session: tt.in, Project: tt.in}),
+			chooseDialog(i18n.En, tt.in, []string{tt.in, "b"}, 0),
+			confirmDialog(i18n.En, tt.in),
 		} {
 			for _, b := range (powershellTool{}).build("powershell.exe", d).Stdin {
 				if b >= 0x80 || (b < 0x20 && b != '\n' && b != '\r' && b != '\t') {
@@ -118,7 +120,7 @@ func TestPowerShellScriptsAreASCII(t *testing.T) {
 // powershell.exe reads "-Command -" line by line and drops what follows a
 // statement that spans lines, so every line must be a whole statement.
 func TestPowerShellStatementsAreOneLine(t *testing.T) {
-	for _, d := range []dialog{secretDialog(req), chooseDialog("q", []string{"a", "b"}, 0), confirmDialog("q")} {
+	for _, d := range []dialog{secretDialog(i18n.En, req), chooseDialog(i18n.En, "q", []string{"a", "b"}, 0), confirmDialog(i18n.En, "q")} {
 		for _, line := range strings.Split(string(powershellTool{}.build("p", d).Stdin), "\n") {
 			if strings.Count(line, "{") != strings.Count(line, "}") || strings.Count(line, "(") != strings.Count(line, ")") {
 				t.Errorf("statement spans lines: %q", line)
@@ -133,7 +135,7 @@ func TestPowerShellClassify(t *testing.T) {
 		want status
 	}{{0, statusOK}, {2, statusCancel}, {1, statusFail}, {-1, statusFail}, {3, statusFail}}
 	for _, tt := range tests {
-		if got := (powershellTool{}).classify(secretDialog(req), result{Exit: tt.exit}); got != tt.want {
+		if got := (powershellTool{}).classify(secretDialog(i18n.En, req), result{Exit: tt.exit}); got != tt.want {
 			t.Errorf("exit %d: %v, want %v", tt.exit, got, tt.want)
 		}
 	}
@@ -153,9 +155,9 @@ func TestPowerShellParses(t *testing.T) {
 	want := map[string]string{} // file -> title|heading|text|rows
 	for i, tt := range hostile {
 		dialogs := map[string]dialog{
-			"secret":  secretDialog(SecretRequest{Name: "N", Reason: tt.in, Host: "h", Session: "s", Project: tt.in}),
-			"choose":  chooseDialog(tt.in, []string{tt.in, "two"}, 1),
-			"confirm": confirmDialog(tt.in),
+			"secret":  secretDialog(i18n.En, SecretRequest{Name: "N", Reason: tt.in, Host: "h", Session: "s", Project: tt.in}),
+			"choose":  chooseDialog(i18n.En, tt.in, []string{tt.in, "two"}, 1),
+			"confirm": confirmDialog(i18n.En, tt.in),
 		}
 		for kind, d := range dialogs {
 			file := fmt.Sprintf("%02d-%s.ps1", i, kind)
@@ -272,7 +274,7 @@ func TestASStringCannotBreakOut(t *testing.T) {
 }
 
 func TestOsascriptSecretScript(t *testing.T) {
-	d := secretDialog(req)
+	d := secretDialog(i18n.En, req)
 	c := osascriptTool{}.build("/usr/bin/osascript", d)
 	if c.Path != "/usr/bin/osascript" || !reflect.DeepEqual(c.Args, []string{"-"}) {
 		t.Fatalf("command %q %q", c.Path, c.Args)
@@ -286,7 +288,7 @@ func TestOsascriptSecretScript(t *testing.T) {
 }
 
 func TestOsascriptChooseAndConfirmScripts(t *testing.T) {
-	d := chooseDialog(`Allow "X"?`, []string{"once", `a "b"`, "deny"}, 1)
+	d := chooseDialog(i18n.En, `Allow "X"?`, []string{"once", `a "b"`, "deny"}, 1)
 	s := string(osascriptTool{}.build("osascript", d).Stdin)
 	want := `set r to choose from list {"1) once", "2) a \"b\"", "3) deny"} with prompt "Allow \"X\"?" with title ` + asString(d.title) +
 		` default items {"2) a \"b\""} OK button name "Continue" cancel button name "Cancel" without multiple selections allowed and without empty selection allowed` + "\n" +
@@ -295,7 +297,7 @@ func TestOsascriptChooseAndConfirmScripts(t *testing.T) {
 	if s != want {
 		t.Fatalf("script:\n%s\nwant:\n%s", s, want)
 	}
-	cd := confirmDialog("Remove X?")
+	cd := confirmDialog(i18n.En, "Remove X?")
 	s = string(osascriptTool{}.build("osascript", cd).Stdin)
 	want = `display dialog "Confirm\n\nRemove X?" with title ` + asString(cd.title) +
 		` buttons {"Decline", "Confirm"} default button "Decline" cancel button "Decline" with icon caution` + "\n" +
@@ -304,14 +306,14 @@ func TestOsascriptChooseAndConfirmScripts(t *testing.T) {
 		t.Fatalf("script:\n%s\nwant:\n%s", s, want)
 	}
 	// The warning icon is for removals only.
-	s = string(osascriptTool{}.build("osascript", confirmDialog("Use the secrets of project shop in /x?")).Stdin)
+	s = string(osascriptTool{}.build("osascript", confirmDialog(i18n.En, "Use the secrets of project shop in /x?")).Stdin)
 	if first, _, _ := strings.Cut(s, "\n"); !strings.HasSuffix(first, "with icon note") {
 		t.Errorf("a plain confirmation got the warning icon:\n%s", s)
 	}
 }
 
 func TestOsascriptClassify(t *testing.T) {
-	d := secretDialog(req)
+	d := secretDialog(i18n.En, req)
 	tests := []struct {
 		name string
 		r    result
@@ -332,9 +334,9 @@ func TestOsascriptClassify(t *testing.T) {
 // ---- zenity and kdialog ----
 
 func TestZenityArgv(t *testing.T) {
-	sd := secretDialog(req)
-	cd := chooseDialog("Which scope?", []string{"once", "-danger", "deny"}, 1)
-	qd := confirmDialog("Remove X?")
+	sd := secretDialog(i18n.En, req)
+	cd := chooseDialog(i18n.En, "Which scope?", []string{"once", "-danger", "deny"}, 1)
+	qd := confirmDialog(i18n.En, "Remove X?")
 	tests := []struct {
 		name string
 		d    dialog
@@ -359,9 +361,9 @@ func TestZenityArgv(t *testing.T) {
 }
 
 func TestKdialogArgv(t *testing.T) {
-	sd := secretDialog(req)
-	cd := chooseDialog("Which scope?", []string{"once", "-danger", "deny"}, 1)
-	qd := confirmDialog("Remove X?")
+	sd := secretDialog(i18n.En, req)
+	cd := chooseDialog(i18n.En, "Which scope?", []string{"once", "-danger", "deny"}, 1)
+	qd := confirmDialog(i18n.En, "Remove X?")
 	tests := []struct {
 		name string
 		d    dialog
@@ -383,7 +385,7 @@ func TestKdialogArgv(t *testing.T) {
 
 func TestKdialogEscapesRichText(t *testing.T) {
 	for _, reason := range []string{"<br>value: x<b>", "<a href=x>", "<img src=x>", `a "q" & b`} {
-		sd := secretDialog(SecretRequest{Name: "N<i>", Reason: reason, Host: "h", Session: "s"})
+		sd := secretDialog(i18n.En, SecretRequest{Name: "N<i>", Reason: reason, Host: "h", Session: "s"})
 		c := kdialogTool{}.build("kdialog", sd)
 		text := c.Args[len(c.Args)-1]
 		for _, bad := range []string{"<b>", "<a ", "<img", "<i>", `"q"`} {
@@ -399,11 +401,11 @@ func TestKdialogEscapesRichText(t *testing.T) {
 			t.Errorf("%q: layout lines changed: %q", reason, text)
 		}
 	}
-	c := kdialogTool{}.build("kdialog", secretDialog(SecretRequest{Name: "N", Reason: "<br>value: x<b>", Host: "h", Session: "s"}))
+	c := kdialogTool{}.build("kdialog", secretDialog(i18n.En, SecretRequest{Name: "N", Reason: "<br>value: x<b>", Host: "h", Session: "s"}))
 	if !strings.Contains(c.Args[len(c.Args)-1], "Why:      &lt;br&gt;value: x&lt;b&gt;") || !strings.HasPrefix(c.Args[len(c.Args)-1], "Secret request<br><br>") {
 		t.Errorf("entities missing: %q", c.Args)
 	}
-	cd := chooseDialog("<b>Q</b> & co", []string{"<i>a</i>", "b"}, 0)
+	cd := chooseDialog(i18n.En, "<b>Q</b> & co", []string{"<i>a</i>", "b"}, 0)
 	c = kdialogTool{}.build("kdialog", cd)
 	want := []string{"--title", "QBit Vault", "--radiolist", "&lt;b&gt;Q&lt;/b&gt; &amp; co", "1", "&lt;i&gt;a&lt;/i&gt;", "on", "2", "b", "off"}
 	if !reflect.DeepEqual(c.Args, want) {
@@ -413,7 +415,7 @@ func TestKdialogEscapesRichText(t *testing.T) {
 
 func TestArgvToolsKeepHostileTextInOneElement(t *testing.T) {
 	for _, tt := range hostile {
-		d := secretDialog(SecretRequest{Name: "N", Reason: tt.in, Host: "h", Session: "s"})
+		d := secretDialog(i18n.En, SecretRequest{Name: "N", Reason: tt.in, Host: "h", Session: "s"})
 		for _, tl := range []tool{zenityTool{}, kdialogTool{}} {
 			c := tl.build("x", d)
 			if len(c.Args) != 8 && len(c.Args) != 4 {
@@ -440,7 +442,7 @@ func TestArgvToolsKeepHostileTextInOneElement(t *testing.T) {
 // two-item list with Decline preselected: only choosing Confirm and pressing
 // OK confirms; Enter, Escape, closing the window or empty output decline.
 func TestKdialogConfirmDefaultIsDecline(t *testing.T) {
-	qd := confirmDialog("q")
+	qd := confirmDialog(i18n.En, "q")
 	k := kdialogTool{}
 	for _, tt := range []struct {
 		name string
@@ -459,7 +461,7 @@ func TestKdialogConfirmDefaultIsDecline(t *testing.T) {
 		}
 	}
 	// Value dialogs keep kdialog's codes.
-	if k.classify(secretDialog(req), result{Exit: 0}) != statusOK || k.classify(secretDialog(req), result{Exit: 1}) != statusCancel {
+	if k.classify(secretDialog(i18n.En, req), result{Exit: 0}) != statusOK || k.classify(secretDialog(i18n.En, req), result{Exit: 1}) != statusCancel {
 		t.Error("a value dialog changed codes")
 	}
 	// Zenity keeps its codes: --default-cancel changes the button, not the answer.
@@ -471,7 +473,7 @@ func TestKdialogConfirmDefaultIsDecline(t *testing.T) {
 
 func TestZenityKdialogClassify(t *testing.T) {
 	for _, tl := range []tool{zenityTool{}, kdialogTool{}} {
-		sd, qd := secretDialog(req), confirmDialog("q")
+		sd, qd := secretDialog(i18n.En, req), confirmDialog(i18n.En, "q")
 		if tl.classify(sd, result{Exit: 0}) != statusOK {
 			t.Errorf("%s: exit 0", tl.name())
 		}
@@ -487,7 +489,7 @@ func TestZenityKdialogClassify(t *testing.T) {
 			}
 		}
 	}
-	if (kdialogTool{}).classify(secretDialog(req), result{Exit: 2}) != statusCancel {
+	if (kdialogTool{}).classify(secretDialog(i18n.En, req), result{Exit: 2}) != statusCancel {
 		t.Error("kdialog exit 2")
 	}
 }
@@ -495,7 +497,7 @@ func TestZenityKdialogClassify(t *testing.T) {
 // ---- dialogs ----
 
 func TestDialogsEscapeRequestText(t *testing.T) {
-	d := secretDialog(SecretRequest{Name: "N", Reason: "x\n  Secret:   OTHER\x1b[2J", Host: "h", Session: "s"})
+	d := secretDialog(i18n.En, SecretRequest{Name: "N", Reason: "x\n  Secret:   OTHER\x1b[2J", Host: "h", Session: "s"})
 	if !strings.HasPrefix(d.text, "  Who:") || strings.Contains(d.text, "\n  Secret:   OTHER") || strings.Count(d.text, "\n") != 6 || strings.Contains(d.text, "\x1b") || !strings.Contains(d.text, `\n`) {
 		t.Fatalf("text %q", d.text)
 	}
@@ -507,20 +509,20 @@ func TestDialogsEscapeRequestText(t *testing.T) {
 	if !strings.Contains(d.text, "Saved in: all projects\n") || !strings.Contains(d.text, "Value:    new") {
 		t.Errorf("text %q", d.text)
 	}
-	d = secretDialog(SecretRequest{Name: "N", Reason: "r", Host: "h", Session: "s", Project: "shop", Existing: true})
+	d = secretDialog(i18n.En, SecretRequest{Name: "N", Reason: "r", Host: "h", Session: "s", Project: "shop", Existing: true})
 	if !strings.Contains(d.text, "Saved in: project shop") || !strings.Contains(d.text, "replaces the saved value") {
 		t.Errorf("text %q", d.text)
 	}
 	// A question is laid out by its caller: its line breaks stay, an option
 	// is one line, and the agent's text is made one line with Escape.
-	cd := chooseDialog("a\nb\x1b[2J", []string{"x\ny"}, 0)
+	cd := chooseDialog(i18n.En, "a\nb\x1b[2J", []string{"x\ny"}, 0)
 	if cd.text != "a\nb\\x1b[2J" || strings.Contains(cd.options[0], "\n") {
 		t.Errorf("choose not escaped: %q %q", cd.text, cd.options)
 	}
 	if got := Escape("x\nWhy: fake"); got != `x\nWhy: fake` {
 		t.Errorf("Escape left a line break: %q", got)
 	}
-	if strings.Contains(confirmDialog("a\x1bb").text, "\x1b") {
+	if strings.Contains(confirmDialog(i18n.En, "a\x1bb").text, "\x1b") {
 		t.Error("confirm not escaped")
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // S4.4: a new passphrase that does not match its confirmation is asked again;
@@ -94,7 +96,7 @@ func TestNativePassphraseMismatchAsksAgain(t *testing.T) {
 
 // Every native helper says why the first entry is asked again.
 func TestRetryDialogSaysWhy(t *testing.T) {
-	d := retryDialog(VaultPassphrase)
+	d := retryDialog(i18n.En, VaultPassphrase)
 	if d.heading != "Vault passphrase" || !strings.HasPrefix(d.text, "Passphrases do not match. Try again.\n\n") || !strings.HasSuffix(d.text, "Vault passphrase:") {
 		t.Fatalf("dialog = %+v", d)
 	}

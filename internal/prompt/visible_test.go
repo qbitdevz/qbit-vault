@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // A text field (R-CAP-09) is visible while typed; a secret one stays masked.
@@ -22,17 +24,17 @@ func TestHeaderShowsFieldAndInput(t *testing.T) {
 }
 
 func TestSecretDialogVisibleText(t *testing.T) {
-	d := secretDialog(textReq)
+	d := secretDialog(i18n.En, textReq)
 	if !d.visible || !strings.HasSuffix(d.text, "Type the value (shown while you type):") {
 		t.Fatalf("dialog=%+v", d)
 	}
-	if h := secretDialog(req); h.visible || !strings.HasSuffix(h.text, "Paste or type the value. The agent never sees it:") || h.title != "QBit Vault" || h.heading != "Secret request" {
+	if h := secretDialog(i18n.En, req); h.visible || !strings.HasSuffix(h.text, "Paste or type the value. The agent never sees it:") || h.title != "QBit Vault" || h.heading != "Secret request" {
 		t.Fatalf("hidden dialog=%+v", h)
 	}
 }
 
 func TestVisibleBuilders(t *testing.T) {
-	d := secretDialog(textReq)
+	d := secretDialog(i18n.En, textReq)
 	if got := (zenityTool{}).build("/usr/bin/zenity", d).Args; !reflect.DeepEqual(got, []string{"--entry", "--no-markup", "--width=480", "--title=QBit Vault", "--text=" + d.plain(), "--ok-label=Save", "--cancel-label=Cancel"}) {
 		t.Errorf("zenity: %q", got)
 	}
@@ -46,7 +48,7 @@ func TestVisibleBuilders(t *testing.T) {
 	if !strings.Contains(ps, "$hide = $false\n") || !strings.Contains(ps, "$tb.UseSystemPasswordChar = $hide") {
 		t.Errorf("powershell visible prelude missing")
 	}
-	if !strings.Contains(psScript(secretDialog(req)), "$hide = $true\n") {
+	if !strings.Contains(psScript(secretDialog(i18n.En, req)), "$hide = $true\n") {
 		t.Errorf("powershell hidden prelude missing")
 	}
 }

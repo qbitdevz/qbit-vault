@@ -82,7 +82,7 @@ func newUninstall(g *globals) *cobra.Command {
 				for i, e := range entries {
 					names[i] = e.name
 				}
-				if err := askYes(ask, "Revert the qbit-vault registrations in "+strings.Join(names, ", ")+"? The vault stays."); err != nil {
+				if err := askYes(ask, g.loc().T("q.uninstall", strings.Join(names, ", "))); err != nil {
 					return err
 				}
 			}
@@ -188,8 +188,8 @@ func confirmPurge(g *globals, ask prompt.Backend, home *string, hostCount int) e
 		return codedError{"sync_configured", "this vault syncs with " + rem.Server + "; run 'qbit-vault remote logout' first, then purge", exitcode.Failure}
 	}
 	word, err := askText(ask, prompt.SecretRequest{
-		Name:    "confirmation",
-		Reason:  fmt.Sprintf("Type '%s' to revert %d host registration(s) and permanently delete the vault at %s and its key in the OS keychain", purgeWord, hostCount, abs),
+		Name:    g.loc().T("name.confirmation"),
+		Reason:  g.loc().T("reason.purge", purgeWord, hostCount, abs),
 		Host:    "cli",
 		Visible: true,
 	})
@@ -245,7 +245,7 @@ func isLink(path string) bool {
 // vaultFiles and vaultDirs are what a vault home holds; locks and the temp
 // files of atomic writes are matched by shape.
 var (
-	vaultFiles = map[string]bool{"vault.enc": true, "state.json": true, "grants.enc": true, "audit.jsonl": true,
+	vaultFiles = map[string]bool{"vault.enc": true, "state.json": true, "grants.enc": true, "usage.enc": true, "audit.jsonl": true,
 		"audit.head": true, "key.enc": true, "config.yaml": true, "bindings.yaml": true, "dumpguard.yaml": true}
 	vaultDirs = map[string]bool{"backups": true, "keys": true, "remote": true}
 )

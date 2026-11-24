@@ -13,6 +13,7 @@ import (
 	"github.com/qbitdevz/qbit-vault/internal/hosts/codex"
 	"github.com/qbitdevz/qbit-vault/internal/hosts/pi"
 	"github.com/qbitdevz/qbit-vault/internal/prompt"
+	"github.com/qbitdevz/qbit-vault/internal/vault"
 )
 
 // hostRegistry returns the host adapters of this build: Claude Code, Codex and
@@ -47,7 +48,8 @@ func (g *globals) runDoctor() doctor.Report {
 					// An unreadable store is reported, not a reason to hide the rest.
 					reset = true
 				}
-				return doctor.Opened{Keychain: string(s.mode), GrantsReset: reset}, nil
+				_, uerr := s.v.Usage()
+				return doctor.Opened{Keychain: string(s.mode), GrantsReset: reset, UsageUnreadable: errors.Is(uerr, vault.ErrUsageUnreadable)}, nil
 			case errors.Is(err, errSessionLocked):
 				return doctor.Opened{}, doctor.ErrLocked
 			default:

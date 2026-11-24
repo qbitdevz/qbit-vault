@@ -12,7 +12,7 @@ import (
 	"github.com/qbitdevz/qbit-vault/internal/broker"
 )
 
-// waiting is a backend whose request and manage wait for the user: until
+// waiting is a backend whose calls wait (for the user, or for work): until
 // release is closed or the call's context ends.
 type waiting struct {
 	fake
@@ -39,6 +39,21 @@ func (w *waiting) Manage(ctx context.Context, e broker.Envelope, r broker.Manage
 	w.wait(ctx)
 	l := r.Layer
 	return broker.ManageResponse{OK: true, Applied: true, Action: r.Action, Name: r.Name, Layer: &l}, nil
+}
+
+func (w *waiting) List(ctx context.Context, e broker.Envelope) (broker.ListResult, error) {
+	w.wait(ctx)
+	return w.fake.List(ctx, e)
+}
+
+func (w *waiting) Check(ctx context.Context, e broker.Envelope, r broker.CheckRequest) (broker.CheckResponse, error) {
+	w.wait(ctx)
+	return w.fake.Check(ctx, e, r)
+}
+
+func (w *waiting) Exec(ctx context.Context, e broker.Envelope, r broker.ExecRequest) (broker.ExecResponse, error) {
+	w.wait(ctx)
+	return w.fake.Exec(ctx, e, r)
 }
 
 func progressClient(t *testing.T, b broker.Backend, got chan *sdk.ProgressNotificationParams) *sdk.ClientSession {
@@ -132,9 +147,45 @@ func TestNoProgressWithoutAToken(t *testing.T) {
 	}
 }
 
-// The tools that do not wait for a person send no progress.
-func TestNoProgressForList(t *testing.T) {
-	setInterval(t, 10*time.Millisecond)
+// Issue #65: secret_list and secret_exec can wait for the unlock dialog too.
+// They report progress while they wait, with a text that does not claim a
+// dialog is open (secret_exec may just be running its command).
+func TestProgressWhileListAndExecWait(t *testing.T) {
+	setInterval(t, 20*time.Millisecond)
+	for tool, c := range map[string]struct {
+		args map[string]any
+		want string
+	}{
+		"secret_list":    {map[string]any{}, "Waiting for the vault to be unlocked."},
+		"secret_check":   {map[string]any{"names": []any{"A"}}, "Waiting for the vault to be unlocked."},
+		"secret_exec":    {map[string]any{"command": "true", "secrets": []any{map[string]any{"name": "A"}}}, "Waiting for the vault to be unlocked or for the command to finish."},
+		"secret_request": {map[string]any{"name": "A", "reason": "create the github release for v1.2.0"}, "Waiting for the user to answer the dialog."},
+	} {
+		b := &waiting{release: make(chan struct{}), started: make(chan struct{}, 1)}
+		got := make(chan *sdk.ProgressNotificationParams, 100)
+		cs := progressClient(t, b, got)
+		p := &sdk.CallToolParams{Name: tool, Arguments: c.args}
+		p.SetProgressToken("tok-" + tool)
+		done := make(chan error, 1)
+		go func() { _, err := cs.CallTool(context.Background(), p); done <- err }()
+		<-b.started
+		select {
+		case n := <-got:
+			if n.ProgressToken != "tok-"+tool || n.Message != c.want {
+				t.Errorf("%s: progress = %+v, want the message %q", tool, n, c.want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Errorf("%s: no progress while the call waited", tool)
+		}
+		close(b.release)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A call that ends before the first tick sends no progress.
+func TestNoProgressForAQuickList(t *testing.T) {
 	got := make(chan *sdk.ProgressNotificationParams, 10)
 	cs := progressClient(t, &fake{}, got)
 	p := &sdk.CallToolParams{Name: "secret_list", Arguments: map[string]any{}}
@@ -144,7 +195,7 @@ func TestNoProgressForList(t *testing.T) {
 	}
 	time.Sleep(50 * time.Millisecond)
 	if len(got) != 0 {
-		t.Fatal("secret_list sent progress")
+		t.Fatal("a quick secret_list sent progress")
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // Shower is a backend that can show text the user must read and keep, such
@@ -20,17 +22,17 @@ type Shower interface {
 const dialogShow dialogKind = 101
 
 // showDialog escapes every line of text and keeps the line breaks.
-func showDialog(title, text string) dialog {
+func showDialog(loc i18n.Locale, title, text string) dialog {
 	lines := strings.Split(text, "\n")
 	for i, l := range lines {
 		lines[i] = escape(l)
 	}
-	return dialog{kind: dialogShow, title: dialogTitle, heading: escape(title), text: strings.Join(lines, "\n"), okLabel: "Done", cancelLabel: "Cancel"}
+	return dialog{kind: dialogShow, title: dialogTitle, heading: escape(title), text: strings.Join(lines, "\n"), okLabel: loc.T("btn.done"), cancelLabel: loc.T("btn.cancel"), loc: loc}
 }
 
 // Show implements Shower.
 func (n *native) Show(title, text string) error {
-	d := showDialog(title, text)
+	d := showDialog(n.loc, title, text)
 	var c command
 	switch n.t.(type) {
 	case zenityTool:
@@ -41,7 +43,7 @@ func (n *native) Show(title, text string) error {
 	default:
 		// The helper takes its text only as arguments, which any local user
 		// can read: the terminal shows it.
-		return Bind(base(n.ctx), New(n.open, Timeout(n.timeout))).(Shower).Show(title, text)
+		return BindLocale(Bind(base(n.ctx), New(n.open, Timeout(n.timeout))), n.loc).(Shower).Show(title, text)
 	}
 	_, st, err := n.askWith(c, d)
 	if err != nil {
@@ -55,9 +57,9 @@ func (n *native) Show(title, text string) error {
 
 // Show implements Shower on the controlling terminal.
 func (b *tty) Show(title, text string) error {
-	d := showDialog(title, text)
+	d := showDialog(b.loc, title, text)
 	return b.with(func(ctx context.Context, t Terminal) error {
-		_, _ = fmt.Fprintf(t, "\n%s: %s\n\n%s\n\nPress Enter when done. ", dialogTitle, d.heading, d.text)
+		_, _ = fmt.Fprintf(t, "\n%s: %s\n\n%s\n\n%s", dialogTitle, d.heading, d.text, b.loc.T("tty.press_enter"))
 		if _, err := t.ReadLine(ctx); err != nil {
 			return readErr(err)
 		}

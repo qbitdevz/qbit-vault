@@ -12,29 +12,59 @@ import "strings"
 // `/usr/bin/env`, `sudo env`, `command env` and `ENV` all look like `env`).
 // A PowerShell encoded command is refused outright: its script is opaque.
 func (g *Guard) Match(cmd string, injected []string) (refused bool) {
+	_, refused = g.Explain(cmd, injected)
+	return refused
+}
+
+// Hit says which rule refused a command and where. It holds no text of the
+// command or of the pattern.
+type Hit struct {
+	Class Class
+	// Segment is the 0-based index of the top-level pipeline segment that holds
+	// the match (a script run by `sh -c` or a $(...) counts as part of its
+	// segment), or -1 when it is not known (a here-document body, MatchRaw).
+	Segment int
+}
+
+// Explain is Match that also returns the first rule to match, in the order
+// Match tests: segments, then forms, then patterns.
+func (g *Guard) Explain(cmd string, injected []string) (Hit, bool) {
 	if len(injected) == 0 {
-		return false
+		return Hit{}, false
 	}
 	res := g.compiled(injected)
 	segs := Segments(cmd)
+	pipeline := len(segs)
 	if strings.Contains(cmd, "<<") {
 		// Here-document bodies are not commands but they reach a program's
 		// stdin: test the whole text as one segment too.
 		segs = append(segs, rawSegment(strings.NewReplacer("\r", " ", "\n", " ").Replace(cmd)))
 	}
-	for _, seg := range segs {
-		if encodedPowerShell(seg.Words) {
-			return true
+	for i, seg := range segs {
+		at := seg.top // the top-level segment that holds a nested script or substitution
+		if i >= pipeline {
+			at = -1
 		}
-		for _, form := range forms(seg) {
-			for _, re := range res {
-				if re.MatchString(form) {
-					return true
-				}
+		if h, ok := hitIn(seg, res, at); ok {
+			return h, true
+		}
+	}
+	return Hit{}, false
+}
+
+// hitIn tests one segment against the compiled patterns.
+func hitIn(seg Segment, res []compiledPat, at int) (Hit, bool) {
+	if encodedPowerShell(seg.Words) {
+		return Hit{EncodedScript, at}, true
+	}
+	for _, form := range forms(seg) {
+		for _, cp := range res {
+			if cp.re.MatchString(form) {
+				return Hit{cp.class, at}, true
 			}
 		}
 	}
-	return false
+	return Hit{}, false
 }
 
 func forms(seg Segment) []string {
@@ -110,25 +140,25 @@ var rawCleaner = strings.NewReplacer("^", "", "`", "", "\"", "", "'", "")
 // whose grammar Segments does not model (cmd, pwsh): quoting differs from
 // POSIX there, so it errs on the side of refusing.
 func (g *Guard) MatchRaw(cmd string, injected []string) bool {
+	_, refused := g.ExplainRaw(cmd, injected)
+	return refused
+}
+
+// ExplainRaw is MatchRaw that also returns the first rule to match. Its Segment
+// is always -1: the pieces are not pipeline segments.
+func (g *Guard) ExplainRaw(cmd string, injected []string) (Hit, bool) {
 	if len(injected) == 0 {
-		return false
+		return Hit{}, false
 	}
 	res := g.compiled(injected)
 	clean := rawCleaner.Replace(cmd)
 	pieces := strings.FieldsFunc(clean, func(r rune) bool { return strings.ContainsRune("&|;(){}\r\n", r) })
 	for _, text := range append([]string{clean}, pieces...) {
-		if encodedPowerShell(rawSegment(text).Words) {
-			return true
-		}
-		for _, form := range forms(rawSegment(text)) {
-			for _, re := range res {
-				if re.MatchString(form) {
-					return true
-				}
-			}
+		if h, ok := hitIn(rawSegment(text), res, -1); ok {
+			return h, true
 		}
 	}
-	return false
+	return Hit{}, false
 }
 
 func rawSegment(cmd string) Segment {

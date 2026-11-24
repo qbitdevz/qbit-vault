@@ -12,8 +12,8 @@ import (
 
 // rootHelpBeforeTUI is `qbit-vault --help` as captured before the tui command
 // existed. The no-args behavior outside a terminal must stay byte-identical to
-// it, except for the one new line in "Available Commands". (The `update` line
-// was added to the baseline when that command was built.)
+// it, except for the one new line in "Available Commands". (The `update` and `revert` lines
+// were added to the baseline when those commands were built.)
 const rootHelpBeforeTUI = `Local secrets broker for coding agents
 
 Usage:
@@ -36,13 +36,14 @@ Available Commands:
   link        Bind a project layer synced from another device to this repository
   list        List secret names and metadata (never values)
   lock        Passphrase mode: drop the cached master key
-  mcp         Serve the four secret tools over stdio MCP (host plumbing)
+  mcp         Serve the eight secret tools over stdio MCP (host plumbing)
   mv          Move a secret between the global layer and the current project
   prompt      Ask the user to allow a secret and print a prompt token (host plumbing)
   rekey       Rotate the master key
   relink      Repoint a project layer after moving or re-cloning a repository
   remote      Sync the vault between machines through qbit-vault-server
   restore     List encrypted backups or restore the vault from one
+  revert      Restore the value a secret had before its last replacement (kept 7 days)
   revoke      Revoke grants
   rm          Delete a secret
   set         Store or replace a secret value (hidden prompt, or --stdin)

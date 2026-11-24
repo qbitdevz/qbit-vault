@@ -18,6 +18,7 @@ import (
 	"github.com/qbitdevz/qbit-vault/internal/keychain"
 	"github.com/qbitdevz/qbit-vault/internal/refusal"
 	"github.com/qbitdevz/qbit-vault/internal/runner"
+	"github.com/qbitdevz/qbit-vault/internal/secret"
 	"github.com/qbitdevz/qbit-vault/internal/vault"
 )
 
@@ -101,7 +102,7 @@ func (b *cliBackend) bound(e broker.Envelope) *globals {
 
 func (b *cliBackend) hot(e broker.Envelope) *globals {
 	c := *b.g
-	c.Session, c.JSON, c.cwd, c.broker = e.Session, true, e.Cwd, true
+	c.Session, c.JSON, c.cwd, c.broker, c.dialogLocale = e.Session, true, e.Cwd, true, e.Locale
 	c.execStdin = bytes.NewReader(nil)
 	return &c
 }
@@ -188,6 +189,7 @@ func (b *cliBackend) List(ctx context.Context, e broker.Envelope) (broker.ListRe
 	for _, c := range grants.Cooldowns(st, e.Session, now) {
 		res.Cooldowns = append(res.Cooldowns, broker.Cooldown{Name: c.Name, Until: c.Until.UTC().Format(time.RFC3339)})
 	}
+	usage, _ := s.v.Usage() // an unreadable file is empty history (doctor reports it)
 	for _, en := range entries {
 		meta := broker.SecretMeta{
 			Name: en.Name, Layer: layerName(en.Layer), OverridesGlobal: en.OverridesGlobal, Kind: kindOf(en.Record),
@@ -196,6 +198,12 @@ func (b *cliBackend) List(ctx context.Context, e broker.Envelope) (broker.ListRe
 			CreatedAt: en.Record.CreatedAt, UpdatedAt: en.Record.UpdatedAt,
 		}
 		meta.Grant, meta.GrantNote = listedGrant(st, en, e.Session, listCwd, now)
+		if u, ok := usage[en.Record.ID]; ok {
+			meta.LastUsedAt, meta.LastExitCode, meta.LastOKAt = u.LastUsedAt, u.LastExitCode, u.LastOKAt
+		}
+		if until, ok := en.Record.PreviousUntil(); ok {
+			meta.PreviousUntil = until.UTC().Format(time.RFC3339)
+		}
 		res.Secrets = append(res.Secrets, meta)
 	}
 	return res, nil
@@ -218,7 +226,10 @@ func listedGrant(st *grants.Store, en vault.Entry, session, cwd string, now time
 	return nil, ""
 }
 
-func (b *cliBackend) Exec(ctx context.Context, e broker.Envelope, r broker.ExecRequest) (broker.ExecResponse, error) {
+// execSetup is what exec and a job start share before the vault is opened:
+// the call's globals (its session, cwd, locale and cancellation) and the plan
+// the envelope's request stands for.
+func (b *cliBackend) execSetup(ctx context.Context, e broker.Envelope, r broker.ExecRequest) (*globals, execPlan, error) {
 	g := b.hot(e)
 	g.ctx = ctx
 	g.unlock.lockOnCancel = true
@@ -233,9 +244,20 @@ func (b *cliBackend) Exec(ctx context.Context, e broker.Envelope, r broker.ExecR
 	}
 	g.unlock.names = p.names
 	if err := runner.CheckShell(p.shell); err != nil {
-		return broker.ExecResponse{}, refusal.New(refusal.Internal, "").WithMessage("shell not available on this system")
+		return nil, p, refusal.New(refusal.Internal, "").WithMessage("shell not available on this system")
 	}
-	dir, err := filepath.EvalSymlinks(e.Cwd)
+	dir, err := callDir(e.Cwd)
+	if err != nil {
+		return nil, p, err
+	}
+	p.dir = dir
+	return g, p, nil
+}
+
+// callDir is the canonical working directory of a call that reads stored
+// values from it (exec, jobs and check): symlinks resolved, and a directory.
+func callDir(cwd string) (string, error) {
+	dir, err := filepath.EvalSymlinks(cwd)
 	if err == nil {
 		var fi os.FileInfo
 		if fi, err = os.Stat(dir); err == nil && !fi.IsDir() {
@@ -243,9 +265,93 @@ func (b *cliBackend) Exec(ctx context.Context, e broker.Envelope, r broker.ExecR
 		}
 	}
 	if err != nil {
-		return broker.ExecResponse{}, refusal.New(refusal.Internal, "").WithMessage("invalid request: cwd")
+		return "", refusal.New(refusal.Internal, "").WithMessage("invalid request: cwd")
 	}
-	p.dir = dir
+	return dir, nil
+}
+
+// Check is the contract's `check` (CONTRACT.md § check): the values exec
+// would inject from this directory, described by what they look like, never
+// by what they are. Nothing is consumed or written but the audit record.
+func (b *cliBackend) Check(ctx context.Context, e broker.Envelope, r broker.CheckRequest) (broker.CheckResponse, error) {
+	g := b.hot(e)
+	g.ctx = ctx
+	g.unlock.lockOnCancel = true
+	g.unlock.names = r.Names
+	dir, err := callDir(e.Cwd)
+	if err != nil {
+		return broker.CheckResponse{}, err
+	}
+	s, err := g.openSession()
+	if err != nil {
+		return broker.CheckResponse{}, asRefusal(g.lockedHint(err))
+	}
+	defer s.close()
+
+	// 1. Resolve every name from the directory, as exec does.
+	var recs []vault.Entry
+	defer func() { wipeEntries(recs) }()
+	for _, name := range r.Names {
+		en, err := findEntry(s, name, layerFlags{}, dir)
+		if err != nil {
+			return broker.CheckResponse{}, asRefusal(err)
+		}
+		recs = append(recs, en)
+	}
+
+	// 2. The grants exec would accept, without consuming or writing anything:
+	// grants.Lookup is the predicate of grants.Check that `list` shows.
+	grantCwd, err := grantCwdOf(dir)
+	if err != nil {
+		return broker.CheckResponse{}, asRefusal(mapErr(err, ""))
+	}
+	var st *grants.Store
+	if _, err := s.v.ReadGrants(func(body []byte) error {
+		var derr error
+		st, derr = grants.Decode(body)
+		return derr
+	}); err != nil {
+		return broker.CheckResponse{}, asRefusal(mapErr(err, ""))
+	}
+	now := clock()
+	for _, en := range recs {
+		gr, why := grants.Lookup(st, en.Name, en.Layer.Key(), en.Record.ID, en.Record.Sensitive, g.Session, grantCwd, now)
+		if gr == nil {
+			return broker.CheckResponse{}, grantRefusal(en.Name, why, g.Session)
+		}
+	}
+
+	// 3. One audit record per call, before anything is described: a check
+	// that cannot be recorded describes nothing.
+	rec := audit.Record{Event: audit.EventCheck, Session: g.Session, By: "agent", Names: r.Names, Layer: sharedLayer(recs)}
+	if err := audit.Append(g.Home(), rec); err != nil {
+		return broker.CheckResponse{}, refusal.New(refusal.Internal, "")
+	}
+
+	// 4. Describe. Values are only compared with each other here, all of them
+	// granted above, in constant time.
+	res := broker.CheckResponse{OK: true}
+	for i, en := range recs {
+		sh := secret.Inspect(en.Record.Value)
+		cr := broker.CheckResult{
+			Name: en.Name, Layer: layerName(en.Layer), Length: sh.Length, Empty: sh.Empty, Whitespace: sh.Whitespace,
+			Multiline: sh.Multiline, Placeholder: sh.Placeholder, LooksLike: sh.LooksLike, SameAs: []string{},
+		}
+		for j, other := range recs {
+			if i != j && secret.Equal(en.Record.Value, other.Record.Value) {
+				cr.SameAs = append(cr.SameAs, other.Name)
+			}
+		}
+		res.Results = append(res.Results, cr)
+	}
+	return res, nil
+}
+
+func (b *cliBackend) Exec(ctx context.Context, e broker.Envelope, r broker.ExecRequest) (broker.ExecResponse, error) {
+	g, p, err := b.execSetup(ctx, e, r)
+	if err != nil {
+		return broker.ExecResponse{}, err
+	}
 	var out bytes.Buffer
 	cmd := quiet()
 	cmd.SetOut(&out)
@@ -262,6 +368,45 @@ func (b *cliBackend) Exec(ctx context.Context, e broker.Envelope, r broker.ExecR
 	}
 	return res, nil
 }
+
+// PrepareExec is Exec up to the point where the child would be created: the
+// same steps, refusals and audit records (prepareExec), for a job that runs
+// the command in the background (broker.ExecStarter).
+func (b *cliBackend) PrepareExec(ctx context.Context, e broker.Envelope, r broker.ExecRequest) (broker.PreparedExec, error) {
+	g, p, err := b.execSetup(ctx, e, r)
+	if err != nil {
+		return nil, err
+	}
+	x, err := g.prepareExec(io.Discard, p)
+	if err != nil {
+		return nil, asRefusal(g.lockedHint(err))
+	}
+	return &preparedExec{x: x}, nil
+}
+
+// preparedExec is an execRun of a job.
+type preparedExec struct{ x *execRun }
+
+// Run runs the command with its redacted output going to stdout and stderr. It
+// ends the vault session (and wipes the injected values the process no longer
+// needs) as soon as the child exists: a job can run for an hour and must not
+// hold the master key meanwhile.
+func (p *preparedExec) Run(ctx context.Context, stdout, stderr io.Writer, onStart func()) broker.ExecOutcome {
+	x := p.x
+	x.spec.Stdout, x.spec.Stderr = stdout, stderr
+	x.spec.OnStart = func() {
+		x.dropVault()
+		onStart()
+	}
+	res, err := x.run(ctx)
+	return broker.ExecOutcome{
+		Started: res.Started, ExitCode: res.ExitCode, TimedOut: res.TimedOut, Duration: res.Duration,
+		Interrupted: errors.Is(err, context.Canceled),
+		Failed:      err != nil && !errors.Is(err, context.Canceled),
+	}
+}
+
+func (p *preparedExec) Close() { p.x.close() }
 
 func (b *cliBackend) Grant(ctx context.Context, e broker.Envelope, r broker.GrantRequest) (broker.GrantResponse, error) {
 	g := b.hot(e)

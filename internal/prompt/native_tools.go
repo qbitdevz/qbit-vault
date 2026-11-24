@@ -98,7 +98,8 @@ func (kdialogTool) build(path string, d dialog) command {
 	case dialogConfirm:
 		// A --yesno cannot default to no, and Escape answers like its no
 		// button, so a confirmation is a list with Decline preselected.
-		args = append(args, "--radiolist", rich(d.plain()), "1", "Decline", "on", "2", "Confirm", "off")
+		ok, cancel := d.buttons()
+		args = append(args, "--radiolist", rich(d.plain()), "1", rich(cancel), "on", "2", rich(ok), "off")
 	}
 	return command{Path: path, Args: args}
 }
@@ -162,7 +163,7 @@ func (osascriptTool) build(path string, d dialog) command {
 		if d.removal() {
 			icon = "caution"
 		}
-		fmt.Fprintf(&s, `display dialog %s with title %s buttons {"Decline", "Confirm"} default button "Decline" cancel button "Decline" with icon %s`+"\n", asString(d.plain()), asString(d.title), icon)
+		fmt.Fprintf(&s, `display dialog %s with title %s buttons {%s, %s} default button %s cancel button %s with icon %s`+"\n", asString(d.plain()), asString(d.title), asString(cancel), asString(ok), asString(cancel), asString(cancel), icon)
 		s.WriteString("return button returned of result\n")
 	}
 	return command{Path: path, Args: []string{"-"}, Stdin: []byte(s.String())}

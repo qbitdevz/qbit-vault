@@ -160,7 +160,8 @@ func (v *Vault) Put(layer Layer, name string, rec Record) error {
 // record or a replaced value gets a fresh one.
 func putIn(secrets map[string]wireRecord, name string, rec Record, keepID bool) {
 	old, existed := secrets[name]
-	if !(keepID && existed && old.ID != "" && rec.ID == old.ID) {
+	keep := keepID && existed && old.ID != "" && rec.ID == old.ID
+	if !keep {
 		rec.ID = newRecordID()
 	}
 	ts := stamp()
@@ -168,7 +169,14 @@ func putIn(secrets map[string]wireRecord, name string, rec Record, keepID bool) 
 	if old, ok := secrets[name]; ok && old.CreatedAt != "" {
 		rec.CreatedAt = old.CreatedAt
 	}
-	secrets[name] = toWire(rec)
+	w := toWire(rec)
+	switch {
+	case existed && keep:
+		w.Previous = old.Previous // a metadata edit never touches it
+	case existed:
+		w.Previous = previousAfterReplace(old, w, ts)
+	}
+	secrets[name] = w
 }
 
 // Remove deletes name from layer.

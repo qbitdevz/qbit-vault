@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/qbitdevz/qbit-vault/internal/exitcode"
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // A value pasted with its quotes, or with invisible characters copied from a
@@ -30,7 +31,7 @@ func TestValueIssues(t *testing.T) {
 		{"TESTSECRET_é ñ", "", ""},        // visible non-ASCII and a normal space are fine
 	}
 	for _, tt := range tests {
-		problem, fixed := valueIssues([]byte(tt.in))
+		problem, fixed := valueIssues(i18n.En, []byte(tt.in))
 		if problem != tt.problem || string(fixed) != tt.fixed {
 			t.Errorf("valueIssues(%q) = %q, %q; want %q, %q", tt.in, problem, fixed, tt.problem, tt.fixed)
 		}

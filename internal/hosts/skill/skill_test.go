@@ -255,3 +255,130 @@ func TestSkillUnlocksThroughTheToolsAndKeepsTheTerminalAsTheFallback(t *testing.
 		}
 	}
 }
+
+// S5 of odd/tasks/actionable-refusals.md: the model reads every dump_command
+// rule with what to do, and is told that neither an unlocked vault nor a grant
+// lifts the guard and that filtering the output is not an exemption.
+func TestSkillExplainsEveryDumpCommandRuleAndTheHint(t *testing.T) {
+	s := string(skill.Content)
+	for _, r := range refusal.Rules() {
+		if !strings.Contains(s, "`"+string(r)+"`") {
+			t.Errorf("skill does not mention the dump_command rule %s", r)
+		}
+	}
+	for _, want := range []string{
+		"`rule`",
+		"`hint`",
+		"An unlocked vault and a valid grant never override the dump guard",
+		"Filtering the output (`| jq`, `| grep`) does not exempt an earlier pipeline segment",
+		"${#NAME}",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
+		}
+	}
+	if strings.Contains(s, "The command would print a secret or the environment. Rewrite it so it does not.") {
+		t.Error("skill still has the generic dump_command row")
+	}
+}
+
+// Issue #63: the agent sends the conversation language with every call that
+// can open a dialog, and writes its reason in the same language; it never
+// writes dialog text, and identifiers stay as they are.
+func TestSkillAsksForTheConversationLanguage(t *testing.T) {
+	s := string(skill.Content)
+	for _, want := range []string{
+		"## Dialog language",
+		"Always send `locale`",
+		"`secret_request`, `secret_list`, `secret_exec`, `secret_exec_start`, `secret_manage` and `secret_check`",
+		"BCP 47",
+		"`es-ES`",
+		"write the `reason` in that same language",
+		"never translated",
+		"Secret names",
+		"qbit-vault writes every dialog itself",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
+		}
+	}
+}
+
+// Issue #64: the skill states the real limit and the supported route for a
+// long command, and does not send the agent to a detached-job detour.
+func TestSkillStatesTheLimitAndTheRouteForLongCommands(t *testing.T) {
+	s := string(skill.Content)
+	for _, want := range []string{
+		"## Long commands",
+		"the host's own request timeout",
+		"`timeout_ms` only bounds the command",
+		"Do not start a job with `setsid`, `nohup` or `&`",
+		"`qbit-vault exec --secret NAME -- <command>`",
+		"Pass no `--session`",
+		"only a project grant applies",
+		"linked Git worktrees",
+		"`secret_request`",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
+		}
+	}
+	// Mentioned only to forbid it: never as a recipe.
+	for _, bad := range []string{"setsid nohup", "nohup qbit-vault", "setsid qbit-vault"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("skill recommends %q", bad)
+		}
+	}
+}
+
+// Issue #64: the long-command routes name the job tools, in order: a short
+// command through secret_exec, anything past about 30 seconds through a job,
+// and the host's background job through the CLI as the fallback.
+func TestSkillRoutesLongCommandsThroughJobs(t *testing.T) {
+	s := string(skill.Content)
+	long := s[strings.Index(s, "## Long commands"):]
+	long = long[:strings.Index(long[len("## Long commands"):], "\n## ")+len("## Long commands")]
+	routes := []string{
+		"1. A command that finishes well within 30 seconds: `secret_exec`.",
+		"2. Anything that may pass about 30 seconds",
+		"3. The MCP tools are not available",
+	}
+	last := -1
+	for _, r := range routes {
+		i := strings.Index(long, r)
+		if i < 0 || i < last {
+			t.Fatalf("route %q is missing or out of order in:\n%s", r, long)
+		}
+		last = i
+	}
+	for _, want := range []string{
+		"`secret_exec_start`", "`secret_exec_status`", "`secret_exec_stop`",
+		"`wait_ms`", "at most 50000", "`job`", "`running`, `exited`, `timed_out` or `stopped`", "`exit_code`",
+		"Each output is returned once", "At most 4 jobs run at once", "every job ends when the MCP server stops",
+		"a once grant is spent then", "kills the whole process tree",
+	} {
+		if !strings.Contains(long, want) {
+			t.Errorf("the long commands section does not say %q", want)
+		}
+	}
+	// The job refusals have their own instructions in the table.
+	for _, want := range []string{"`too many running jobs` is retryable", "`no such job` means start a new one"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
+		}
+	}
+}
+
+// Verifier findings F2 and F4: the skill tells the true lag and the cap on unread results.
+func TestSkillStatesTheLagAndTheUnreadJobCap(t *testing.T) {
+	s := string(skill.Content)
+	for _, want := range []string{
+		"only the end of a line that could be the start of a secret value is held back",
+		"at most 8 finished jobs you have not read",
+		"read a job's result before starting many more",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
+		}
+	}
+}

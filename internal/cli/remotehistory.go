@@ -147,7 +147,7 @@ func newRemoteRestore(g *globals) *cobra.Command {
 				return err
 			}
 			defer clear(body)
-			q := fmt.Sprintf("Restore the vault to server version %d (written by %s, %s)? Records that differ are replaced; the current state stays in the local backups.", n, label, at)
+			q := g.loc().T("q.history", n, label, at)
 			if err := askYes(ask, q); err != nil {
 				return err
 			}

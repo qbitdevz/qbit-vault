@@ -2,6 +2,8 @@ package broker
 
 import (
 	"context"
+	"io"
+	"time"
 
 	"github.com/qbitdevz/qbit-vault/internal/refusal"
 )
@@ -14,6 +16,11 @@ type Envelope struct {
 	Session  string `json:"session"`
 	Cwd      string `json:"cwd"`
 	Host     *Host  `json:"host,omitempty"`
+	// Locale is the optional BCP 47 tag of the conversation language that
+	// request, list, exec, manage and check may carry (CONTRACT.md § Dialog
+	// language). It is the caller's raw text: whoever resolves it ignores a
+	// tag that names no language, and nothing ever shows, logs or echoes it.
+	Locale string `json:"-"`
 }
 
 // Host names the calling host, for audit.
@@ -34,6 +41,12 @@ type ExecRequest struct {
 	Secrets   []ExecSecret
 	TimeoutMS int
 	Shell     string
+}
+
+// CheckRequest is a validated `check`: one to MaxExecSecrets distinct, valid
+// secret names.
+type CheckRequest struct {
+	Names []string
 }
 
 // GrantRequest is a validated `grant`. Layer is "global" or "project".
@@ -119,6 +132,17 @@ type SecretMeta struct {
 	// (it does not apply from this directory, or belongs to an earlier value).
 	// Optional and additive: absent when there is nothing to say.
 	GrantNote string `json:"grant_note,omitempty"`
+	// PreviousUntil is when the value this secret replaced stops being
+	// recoverable by a revert (RFC 3339). Optional and additive: present only
+	// while a previous value exists. It is a time, never the value.
+	PreviousUntil string `json:"previous_until,omitempty"`
+	// LastUsedAt, LastExitCode and LastOKAt are the last use of this secret
+	// on this device (CONTRACT.md § Last use): when a command last had it
+	// injected, how that command ended, and when one last ended with exit 0.
+	// Optional and additive; never a command, an output or a value.
+	LastUsedAt   string `json:"last_used_at,omitempty"`
+	LastExitCode *int   `json:"last_exit_code,omitempty"`
+	LastOKAt     string `json:"last_ok_at,omitempty"`
 }
 
 // Notes for SecretMeta.GrantNote. Fixed text: no path, no value.
@@ -177,6 +201,29 @@ type ExecResponse struct {
 	Truncated  bool   `json:"truncated"`
 }
 
+// CheckResult describes one checked secret (CONTRACT.md § check). Every field
+// is a count, a boolean or a word of a closed set, never a value or a part of
+// one. SameAs holds the other names of the same call whose value is
+// byte-identical (never null).
+type CheckResult struct {
+	Name        string   `json:"name"`
+	Layer       string   `json:"layer"`
+	Length      int      `json:"length"`
+	Empty       bool     `json:"empty"`
+	Whitespace  bool     `json:"whitespace"`
+	Multiline   bool     `json:"multiline"`
+	Placeholder bool     `json:"placeholder"`
+	LooksLike   string   `json:"looks_like"`
+	SameAs      []string `json:"same_as"`
+}
+
+// CheckResponse is the `check` success payload, one result per requested
+// name, in request order.
+type CheckResponse struct {
+	OK      bool          `json:"ok"`
+	Results []CheckResult `json:"results"`
+}
+
 // GrantResponse is the `grant` success payload.
 type GrantResponse struct {
 	OK    bool      `json:"ok"`
@@ -219,6 +266,96 @@ type Info struct {
 	Keychain       string
 	PromptBackends []string
 	Streaming      bool
+	// ExecJobs is set by a backend that serves exec_start, exec_status and
+	// exec_stop (the MCP server); capabilities then reports `exec_jobs`.
+	ExecJobs bool
+}
+
+// JobRequest is a validated `exec_status` (WaitMS is the long poll) or
+// `exec_stop` (WaitMS is zero): Job is 32 lowercase hex digits.
+type JobRequest struct {
+	Job    string
+	WaitMS int
+}
+
+// ExecStartResponse is the `exec_start` success payload.
+type ExecStartResponse struct {
+	OK  bool   `json:"ok"`
+	Job string `json:"job"`
+}
+
+// Job states of an ExecStatusResponse.
+const (
+	JobRunning  = "running"
+	JobExited   = "exited"
+	JobTimedOut = "timed_out"
+	JobStopped  = "stopped"
+)
+
+// ExecStatusResponse is the `exec_status` and `exec_stop` success payload.
+// Stdout, Stderr, Redactions and Truncated cover the output produced since
+// the previous call for the same job. ExitCode is absent while it runs.
+type ExecStatusResponse struct {
+	OK         bool   `json:"ok"`
+	State      string `json:"state"`
+	ExitCode   *int   `json:"exit_code,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
+	Stdout     string `json:"stdout"`
+	Stderr     string `json:"stderr"`
+	Redactions int    `json:"redactions"`
+	Truncated  bool   `json:"truncated"`
+}
+
+// JobBackend is implemented by a Backend that can keep a command running
+// after the call that started it returns: the MCP server, whose process lives
+// as long as the host session. `broker --op` is one process per call and
+// does not implement it, so it answers these ops as an unknown op.
+//
+// ExecStart decides everything exec decides before a process exists, with
+// the same refusals, and returns once the command has started.
+type JobBackend interface {
+	ExecStart(ctx context.Context, e Envelope, r ExecRequest) (ExecStartResponse, error)
+	ExecStatus(ctx context.Context, e Envelope, r JobRequest) (ExecStatusResponse, error)
+	ExecStop(ctx context.Context, e Envelope, r JobRequest) (ExecStatusResponse, error)
+}
+
+// ExecOutcome is how a prepared exec ended.
+type ExecOutcome struct {
+	// Started reports whether the operating system created the child.
+	Started  bool
+	ExitCode int
+	// TimedOut: the command hit its timeout and its tree was killed.
+	TimedOut bool
+	// Interrupted: the context given to Run ended and its tree was killed.
+	Interrupted bool
+	// Failed: the run failed for another reason (the command could not
+	// start, or its output could not be read).
+	Failed   bool
+	Duration time.Duration
+}
+
+// ExecStarter is implemented by a Backend whose exec can be split into what
+// happens before a process exists and the run itself, so a job can decide
+// synchronously and run in the background through the same code as exec.
+type ExecStarter interface {
+	// PrepareExec does everything exec does before the child exists: the
+	// vault, the grants (a once grant is claimed), the dump guard, the binary
+	// rules and the audit record of the start. Its refusals are exec's. With
+	// a nil error the caller must call Close exactly once.
+	PrepareExec(ctx context.Context, e Envelope, r ExecRequest) (PreparedExec, error)
+}
+
+// PreparedExec is an exec that passed every check.
+type PreparedExec interface {
+	// Run starts the command and returns when it ends. Everything written to
+	// stdout and stderr is already redacted; when a writer implements
+	// redact.CountedWriter it also gets the replacement counts. onStart is
+	// called once, when the child exists (never, if it cannot start). ctx
+	// ends the run: the child's whole process tree is killed.
+	Run(ctx context.Context, stdout, stderr io.Writer, onStart func()) ExecOutcome
+	// Close wipes the injected values and, if the child never started, gives
+	// back the once grants claimed by PrepareExec.
+	Close()
 }
 
 // Backend implements the operations. Every method gets the validated
@@ -228,6 +365,9 @@ type Info struct {
 type Backend interface {
 	List(ctx context.Context, e Envelope) (ListResult, error)
 	Exec(ctx context.Context, e Envelope, r ExecRequest) (ExecResponse, error)
+	// Check describes the values of secrets the caller could use right now,
+	// without consuming a grant and without returning a value.
+	Check(ctx context.Context, e Envelope, r CheckRequest) (CheckResponse, error)
 	Grant(ctx context.Context, e Envelope, r GrantRequest) (GrantResponse, error)
 	Revoke(ctx context.Context, e Envelope, r RevokeRequest) (RevokeResponse, error)
 	Request(ctx context.Context, e Envelope, r RequestRequest) (RequestResponse, error)

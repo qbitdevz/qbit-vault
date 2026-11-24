@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 )
 
 // S7.1, S7.7: every dialog has the one window title, the heading that says
@@ -15,15 +17,15 @@ func TestEveryDialogHasOneTitleAHeadingAndActionButtons(t *testing.T) {
 		d               dialog
 		heading, ok, no string
 	}{
-		{"secret", secretDialog(req), "Secret request", "Save", "Cancel"},
-		{"form", formDialog(formReqs), "Secret request", "Save", "Cancel"},
-		{"permission", chooseDialog("q", permission, 0), "Permission request", "Continue", "Cancel"},
-		{"choice", chooseDialog("Where should A be saved?", []string{"All projects", "Only this project (shop)"}, 0), "", "Continue", "Cancel"},
-		{"confirm", confirmDialog("Remove A (all projects)?"), "Confirm", "Confirm", "Decline"},
-		{"recovery key", showDialog("Recovery key", "QVR1-X"), "Recovery key", "Done", "Cancel"},
-		{"confirmation code", showDialog("Confirmation code", "123456"), "Confirmation code", "Done", "Cancel"},
-		{"vault passphrase", passphraseDialog(VaultPassphrase, false), "Vault passphrase", "Continue", "Cancel"},
-		{"export passphrase", passphraseDialog(ExportPassphrase, false), "Export passphrase", "Continue", "Cancel"},
+		{"secret", secretDialog(i18n.En, req), "Secret request", "Save", "Cancel"},
+		{"form", formDialog(i18n.En, formReqs), "Secret request", "Save", "Cancel"},
+		{"permission", chooseDialog(i18n.En, "q", permission, 0), "Permission request", "Continue", "Cancel"},
+		{"choice", chooseDialog(i18n.En, "Where should A be saved?", []string{"All projects", "Only this project (shop)"}, 0), "", "Continue", "Cancel"},
+		{"confirm", confirmDialog(i18n.En, "Remove A (all projects)?"), "Confirm", "Confirm", "Decline"},
+		{"recovery key", showDialog(i18n.En, "Recovery key", "QVR1-X"), "Recovery key", "Done", "Cancel"},
+		{"confirmation code", showDialog(i18n.En, "Confirmation code", "123456"), "Confirmation code", "Done", "Cancel"},
+		{"vault passphrase", passphraseDialog(i18n.En, VaultPassphrase, false), "Vault passphrase", "Continue", "Cancel"},
+		{"export passphrase", passphraseDialog(i18n.En, ExportPassphrase, false), "Export passphrase", "Continue", "Cancel"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -43,7 +45,7 @@ func TestEveryDialogHasOneTitleAHeadingAndActionButtons(t *testing.T) {
 // S7.6: the request lines go to the Windows dialog as a two-column grid, and
 // S7.8: in a confirmation Decline is the highlighted button.
 func TestPowerShellGridAndButtons(t *testing.T) {
-	s := string(powershellTool{}.build("powershell.exe", secretDialog(req)).Stdin)
+	s := string(powershellTool{}.build("powershell.exe", secretDialog(i18n.En, req)).Stdin)
 	prelude := s[:strings.Index(s, psBodyMarker)]
 	for _, want := range []string{
 		"$heading = Dec " + psString("Secret request"),
@@ -59,7 +61,7 @@ func TestPowerShellGridAndButtons(t *testing.T) {
 	if !strings.Contains(s, "TableLayoutPanel") || strings.Contains(s, "qbit-vault: ") {
 		t.Error("the request lines are not a grid")
 	}
-	c := string(powershellTool{}.build("powershell.exe", confirmDialog("Remove A?")).Stdin)
+	c := string(powershellTool{}.build("powershell.exe", confirmDialog(i18n.En, "Remove A?")).Stdin)
 	for _, want := range []string{"$confirm = $true", "$okLabel = Dec " + psString("Confirm"), "$cancelLabel = Dec " + psString("Decline"), "$f.AcceptButton = $no", "if ($confirm) {"} {
 		if !strings.Contains(c, want) {
 			t.Errorf("confirm script lacks %q", want)
@@ -78,12 +80,12 @@ func TestZenityShowAndFormLabels(t *testing.T) {
 	if !reflect.DeepEqual(f.cmds[0].Args, want) || string(f.cmds[0].Stdin) != "Recovery key\n\n"+fxShown {
 		t.Errorf("args=%q stdin=%q", f.cmds[0].Args, f.cmds[0].Stdin)
 	}
-	for _, d := range []dialog{secretDialog(req), chooseDialog("q", []string{"a", "b"}, 0), confirmDialog("q")} {
+	for _, d := range []dialog{secretDialog(i18n.En, req), chooseDialog(i18n.En, "q", []string{"a", "b"}, 0), confirmDialog(i18n.En, "q")} {
 		if !contains(zenityTool{}.build("z", d).Args, "--width=480") {
 			t.Errorf("zenity %v dialog is not 480 wide", d.kind)
 		}
 	}
-	if !contains(zenityTool{}.build("z", chooseDialog("q", []string{"a", "b"}, 0)).Args, "--hide-header") {
+	if !contains(zenityTool{}.build("z", chooseDialog(i18n.En, "q", []string{"a", "b"}, 0)).Args, "--hide-header") {
 		t.Error("the zenity list still shows its Pick and Index headers")
 	}
 }
@@ -99,11 +101,11 @@ func contains(args []string, a string) bool {
 
 // S7.7: osascript shows the action in its buttons.
 func TestOsascriptShowAndPassphraseButtons(t *testing.T) {
-	s := string(osascriptTool{}.build("osascript", showDialog("Recovery key", "QVR1-X")).Stdin)
+	s := string(osascriptTool{}.build("osascript", showDialog(i18n.En, "Recovery key", "QVR1-X")).Stdin)
 	if !strings.Contains(s, `buttons {"Cancel", "Done"} default button "Done" cancel button "Cancel" with icon note`) {
 		t.Errorf("show script:\n%s", s)
 	}
-	s = string(osascriptTool{}.build("osascript", passphraseDialog(ExportPassphrase, false)).Stdin)
+	s = string(osascriptTool{}.build("osascript", passphraseDialog(i18n.En, ExportPassphrase, false)).Stdin)
 	if !strings.Contains(s, `with title "QBit Vault"`) || !strings.HasPrefix(s, `display dialog "Export passphrase\n\nExport passphrase (protects this backup file):"`) {
 		t.Errorf("passphrase script:\n%s", s)
 	}

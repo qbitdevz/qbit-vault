@@ -161,7 +161,7 @@ func TestSessionRefusals(t *testing.T) {
 }
 
 func TestMapErr(t *testing.T) {
-	busy := refusal.New(refusal.Internal, "").WithMessage("vault is busy").WithRetryable(true)
+	busy := refusal.New(refusal.Internal, "").WithMessage("vault is busy").WithRetryable(true).WithHint(refusal.HintBusy)
 	tests := []struct {
 		name string
 		err  error

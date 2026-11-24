@@ -14,6 +14,7 @@ import (
 	"github.com/qbitdevz/qbit-vault/internal/keychain"
 	"github.com/qbitdevz/qbit-vault/internal/merge"
 	"github.com/qbitdevz/qbit-vault/internal/prompt"
+	"github.com/qbitdevz/qbit-vault/internal/prompt/i18n"
 	"github.com/qbitdevz/qbit-vault/internal/remote"
 	"github.com/qbitdevz/qbit-vault/internal/secret"
 	"github.com/qbitdevz/qbit-vault/internal/vault"
@@ -22,6 +23,9 @@ import (
 // Account lifecycle commands (docs/REMOTE_SYNC.md § 4): register, join,
 // approve and logout. All of them are user-only.
 
+// The names the dialogs of these commands give what they ask for, in English.
+// The dialogs take them from the catalogue (name.* entries) in the user's
+// language; a test keeps the two equal.
 const (
 	nameInvite   = "invite code"
 	nameRecovery = "recovery key"
@@ -106,11 +110,12 @@ func newRemoteRegister(g *globals) *cobra.Command {
 				return remoteErr(err, "")
 			}
 			host := serverHost(server)
-			invite, err := askText(ask, prompt.SecretRequest{Name: nameInvite, Reason: "Register this vault on " + host, Host: "cli"})
+			loc := g.loc()
+			invite, err := askText(ask, prompt.SecretRequest{Name: loc.T("name.invite"), Reason: loc.T("reason.register", g.hostIn(host)), Host: "cli"})
 			if err != nil {
 				return err
 			}
-			if err := askYes(ask, "Sync this vault to "+host+"? Secrets are encrypted on this device before upload; the server can never read them."); err != nil {
+			if err := askYes(ask, loc.T("q.sync", g.hostIn(host))); err != nil {
 				return err
 			}
 
@@ -179,7 +184,7 @@ func newRemoteRegister(g *globals) *cobra.Command {
 			}
 			g.auditRemote(cmd, "registered")
 
-			if err := confirmRecoveryKey(ask, show, rkText); err != nil {
+			if err := confirmRecoveryKey(ask, show, loc, rkText); err != nil {
 				return err
 			}
 			st.RecoveryUnconfirmed = false
@@ -225,14 +230,14 @@ func clientErr(err error) error {
 // characters; a wrong answer shows it again until it is right or the user
 // cancels (§ 4.1 step 5). A cancel leaves the account without a confirmed
 // key, and says how to get a new one.
-func confirmRecoveryKey(ask prompt.Backend, show prompt.Shower, rkText string) error {
+func confirmRecoveryKey(ask prompt.Backend, show prompt.Shower, loc i18n.Locale, rkText string) error {
 	want := codeText(rkText)
 	want = want[len(want)-4:]
 	for {
-		if err := show.Show("Recovery key", "Write this recovery key down and keep it offline. It is the only way to open your vault on a new machine if you lose access to every device.\n\n"+rkText+"\n"); err != nil {
+		if err := show.Show(loc.T("show.recovery_title"), loc.T("show.recovery_text")+"\n\n"+rkText+"\n"); err != nil {
 			return unconfirmed(userFail(err))
 		}
-		got, err := askText(ask, prompt.SecretRequest{Name: nameLastFour, Reason: "Check that you saved the recovery key", Host: "cli"})
+		got, err := askText(ask, prompt.SecretRequest{Name: loc.T("name.last_four"), Reason: loc.T("reason.check_key"), Host: "cli"})
 		if err != nil {
 			return unconfirmed(err)
 		}
@@ -297,9 +302,12 @@ func newRemoteJoin(g *globals) *cobra.Command {
 				return mapErr(err, "")
 			}
 			host := serverHost(server)
-			q := "Join the synced vault on " + host + "?"
-			if n := len(all); n > 0 {
-				q += fmt.Sprintf(" %d local %s will be added to the synced vault on %s.", n, plural(n, "secret", "secrets"), host)
+			loc := g.loc()
+			q := loc.T("q.join", g.hostIn(host))
+			if n := len(all); n == 1 {
+				q += loc.T("q.join_local_one", n, g.hostIn(host))
+			} else if n > 1 {
+				q += loc.T("q.join_local_many", n, g.hostIn(host))
 			}
 			if err := askYes(ask, q); err != nil {
 				return err
@@ -422,7 +430,8 @@ func (j *joining) byPairing(ctx context.Context) error {
 		return errPairingFailed
 	}
 	want := remote.ConfirmationCode(remote.Subkeys(mk).Pairing, p.Code, j.deviceID, eph)
-	typed, err := askText(j.ask, prompt.SecretRequest{Name: nameConfirm, Heading: "Confirmation code", Reason: "Type the confirmation code shown on the device that approved this one", Host: "cli"})
+	loc := j.g.loc()
+	typed, err := askText(j.ask, prompt.SecretRequest{Name: loc.T("name.confirm_code"), Heading: loc.T("heading.confirm_code"), Reason: loc.T("reason.confirm_code"), Host: "cli"})
 	if err != nil {
 		mk.Wipe()
 		j.dropDevice()
@@ -485,7 +494,8 @@ func (j *joining) wait(p remote.Pairing) (remote.PollResult, error) {
 }
 
 func (j *joining) byRecovery(ctx context.Context) error {
-	text, err := askText(j.ask, prompt.SecretRequest{Name: nameRecovery, Reason: "Recover the vault on " + j.host, Host: "cli"})
+	loc := j.g.loc()
+	text, err := askText(j.ask, prompt.SecretRequest{Name: loc.T("name.recovery"), Reason: loc.T("reason.recover", j.g.hostIn(j.host)), Host: "cli"})
 	if err != nil {
 		return err
 	}
@@ -634,7 +644,8 @@ func newRemoteApprove(g *globals) *cobra.Command {
 				return errRemoteOff
 			}
 			host := serverHost(st.Server)
-			typed, err := askText(ask, prompt.SecretRequest{Name: namePairing, Reason: "Approve a new device on " + host, Host: "cli"})
+			loc := g.loc()
+			typed, err := askText(ask, prompt.SecretRequest{Name: loc.T("name.pairing"), Reason: loc.T("reason.approve", g.hostIn(host)), Host: "cli"})
 			if err != nil {
 				return err
 			}
@@ -672,8 +683,8 @@ func newRemoteApprove(g *globals) *cobra.Command {
 			}
 			// The name dialog is the consent: Cancel refuses.
 			def := fmt.Sprintf("device %d", len(roster)+1)
-			label, err := askText(ask, prompt.SecretRequest{Name: nameLabel, Host: "cli", Visible: true,
-				Reason: fmt.Sprintf("Add this device to your vault on %s? It will be able to read every secret. Name it, or leave this empty for %q.", host, def)})
+			label, err := askText(ask, prompt.SecretRequest{Name: loc.T("name.label"), Host: "cli", Visible: true,
+				Reason: loc.T("reason.add_device", g.hostIn(host), def)})
 			if err != nil {
 				return err
 			}
@@ -707,7 +718,7 @@ func newRemoteApprove(g *globals) *cobra.Command {
 				return err
 			}
 			conf := remote.ConfirmationCode(remote.Subkeys(s.key).Pairing, code, keys.DeviceID, eph)
-			showErr := show.Show("Confirmation code", "Type this code on the new device.\n\n"+conf+"\n")
+			showErr := show.Show(loc.T("heading.confirm_code"), loc.T("show.confirm_text")+"\n\n"+conf+"\n")
 			if err := s.v.EditRoster(func(r map[string]merge.Device) { r[keys.DeviceID] = entry }); err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), warnApproveRoster)
 			} else if _, err := g.syncRound(ctx, s, c, me.id); err != nil {
@@ -752,7 +763,7 @@ func newRemoteLogout(g *globals) *cobra.Command {
 				return err
 			}
 			host := serverHost(st.Server)
-			if err := askYes(ask, "Stop syncing this vault on "+host+"? The local vault and key stay."); err != nil {
+			if err := askYes(ask, g.loc().T("q.stop_sync", g.hostIn(host))); err != nil {
 				return err
 			}
 			if !g.remoteOff() {

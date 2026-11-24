@@ -17,7 +17,7 @@ const fixture = "TESTSECRET_panic_value_0123456789"
 
 const (
 	helpHint    = "Run 'qbit-vault --help' for usage.\n"
-	sessionHelp = "invalid --session: must match ^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$"
+	sessionHelp = "invalid --session: use <host>:<id> matching ^[a-z0-9-]+:[A-Za-z0-9._-]{4,128}$, the id the host gives its own session (see 'qbit-vault exec --help')"
 )
 
 func envFrom(m map[string]string) func(string) string {

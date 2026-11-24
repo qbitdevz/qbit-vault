@@ -217,9 +217,13 @@ func importFromExport(g *globals, cmd *cobra.Command, file string, yes bool) err
 		if err != nil {
 			return mapErr(err, "")
 		}
-		q := fmt.Sprintf("Import %d %s from the export?", countRecords(layers), plural(countRecords(layers), "secret", "secrets"))
+		loc := g.loc()
+		q := loc.T("q.import_many", countRecords(layers))
+		if countRecords(layers) == 1 {
+			q = loc.T("q.import_one", countRecords(layers))
+		}
 		if len(clashes) > 0 {
-			q += " These replace existing ones: " + strings.Join(replacedNames(clashes), ", ")
+			q += loc.T("q.import_replaces", strings.Join(replacedNames(clashes), ", "))
 		}
 		if err := confirmChange(ask, q, usageError{msgConfirmNeeded}); err != nil {
 			return err
