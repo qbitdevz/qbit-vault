@@ -4,7 +4,9 @@ All notable changes to QBit Vault. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
-Actionable refusals (issue #60, `odd/tasks/actionable-refusals.md`). The security decisions do not change: the same commands are refused before any process starts.
+## [1.5.0] - 2026-11-24
+
+Issues #60 to #65 and the dialog window (`odd/tasks/actionable-refusals.md`, `odd/tasks/issues-61-65-dialogs.md`): actionable refusals, tool input limits, progress while a locked vault waits, dialogs in English and Spanish with a minimize button and a Show/Hide toggle, long commands as background jobs, value-free diagnostics, a recoverable previous value and the last use of a secret. The security decisions do not change: the same commands are refused before any process starts. A vault written by 1.5.0 still opens with 1.4.1 (see the compatibility notes below).
 
 ### Added
 
