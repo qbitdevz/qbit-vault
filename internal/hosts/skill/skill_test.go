@@ -290,7 +290,7 @@ func TestSkillAsksForTheConversationLanguage(t *testing.T) {
 	for _, want := range []string{
 		"## Dialog language",
 		"Always send `locale`",
-		"`secret_request`, `secret_list`, `secret_exec` and `secret_manage`",
+		"`secret_request`, `secret_list`, `secret_exec`, `secret_exec_start` and `secret_manage`",
 		"BCP 47",
 		"`es-ES`",
 		"write the `reason` in that same language",
@@ -327,6 +327,44 @@ func TestSkillStatesTheLimitAndTheRouteForLongCommands(t *testing.T) {
 	for _, bad := range []string{"setsid nohup", "nohup qbit-vault", "setsid qbit-vault"} {
 		if strings.Contains(s, bad) {
 			t.Errorf("skill recommends %q", bad)
+		}
+	}
+}
+
+// Issue #64: the long-command routes name the job tools, in order: a short
+// command through secret_exec, anything past about 30 seconds through a job,
+// and the host's background job through the CLI as the fallback.
+func TestSkillRoutesLongCommandsThroughJobs(t *testing.T) {
+	s := string(skill.Content)
+	long := s[strings.Index(s, "## Long commands"):]
+	long = long[:strings.Index(long[len("## Long commands"):], "\n## ")+len("## Long commands")]
+	routes := []string{
+		"1. A command that finishes well within 30 seconds: `secret_exec`.",
+		"2. Anything that may pass about 30 seconds",
+		"3. The MCP tools are not available",
+	}
+	last := -1
+	for _, r := range routes {
+		i := strings.Index(long, r)
+		if i < 0 || i < last {
+			t.Fatalf("route %q is missing or out of order in:\n%s", r, long)
+		}
+		last = i
+	}
+	for _, want := range []string{
+		"`secret_exec_start`", "`secret_exec_status`", "`secret_exec_stop`",
+		"`wait_ms`", "at most 50000", "`job`", "`running`, `exited`, `timed_out` or `stopped`", "`exit_code`",
+		"Each output is returned once", "At most 4 jobs run at once", "every job ends when the MCP server stops",
+		"a once grant is spent then", "kills the whole process tree",
+	} {
+		if !strings.Contains(long, want) {
+			t.Errorf("the long commands section does not say %q", want)
+		}
+	}
+	// The job refusals have their own instructions in the table.
+	for _, want := range []string{"`too many running jobs` is retryable", "`no such job` means start a new one"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("skill does not say %q", want)
 		}
 	}
 }

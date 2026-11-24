@@ -79,7 +79,7 @@ func callJSON(t *testing.T, cs *sdk.ClientSession, tool string, args map[string]
 	return m, res.IsError
 }
 
-func TestFourToolsWithNormativeDescriptions(t *testing.T) {
+func TestSevenToolsWithNormativeDescriptions(t *testing.T) {
 	cs := connect(t, &fake{})
 	res, err := cs.ListTools(context.Background(), nil)
 	if err != nil {
@@ -93,7 +93,7 @@ func TestFourToolsWithNormativeDescriptions(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if strings.Join(names, ",") != "secret_exec,secret_list,secret_manage,secret_request" {
+	if strings.Join(names, ",") != "secret_exec,secret_exec_start,secret_exec_status,secret_exec_stop,secret_list,secret_manage,secret_request" {
 		t.Fatalf("tools=%v", names)
 	}
 	if got := cs.InitializeResult().Instructions; got != broker.Instructions() {
@@ -112,7 +112,7 @@ func TestDescriptionsMatchContract(t *testing.T) {
 			t.Errorf("%s description is not CONTRACT.md's", name)
 		}
 	}
-	if len(ToolDescriptions) != 4 {
+	if len(ToolDescriptions) != 7 {
 		t.Fatalf("%d descriptions", len(ToolDescriptions))
 	}
 }

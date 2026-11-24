@@ -24,7 +24,7 @@ func withLoc(args map[string]any, v any) map[string]any {
 	return out
 }
 
-// The four tools take `locale` and the backend receives it with the envelope.
+// The tools that can open a dialog take `locale` and the backend receives it with the envelope.
 func TestLocaleReachesTheBackendThroughEveryTool(t *testing.T) {
 	for tool, args := range localeCalls {
 		f := &fake{}
@@ -44,6 +44,9 @@ func TestLocaleReachesTheBackendThroughEveryTool(t *testing.T) {
 
 func TestEveryToolAdvertisesLocale(t *testing.T) {
 	for tool, s := range toolInputSchemas(t) {
+		if tool == "secret_exec_status" || tool == "secret_exec_stop" {
+			continue // they open no dialog and take no locale
+		}
 		p, ok := s["properties"].(map[string]any)["locale"].(map[string]any)
 		if !ok || p["type"] != "string" {
 			t.Errorf("%s has no string `locale` property: %v", tool, p)

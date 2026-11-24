@@ -15,7 +15,7 @@ import (
 // as the wire contract states them. Limits the contract reaches through a
 // $ref (secret names, the reason) are left to the broker, whose typed
 // refusals (invalid_name, reason_too_vague) carry a hint.
-var boundKeywords = []string{"minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength", "enum"}
+var boundKeywords = []string{"minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength", "pattern", "enum"}
 
 func toolInputSchemas(t *testing.T) map[string]map[string]any {
 	t.Helper()
@@ -80,7 +80,8 @@ func TestExecSchemaRequiresOneToSixteenSecrets(t *testing.T) {
 func TestToolSchemasCarryTheWireContractBounds(t *testing.T) {
 	tools := toolInputSchemas(t)
 	checked := 0
-	for tool, op := range map[string]string{"secret_request": "request", "secret_list": "list", "secret_exec": "exec", "secret_manage": "manage"} {
+	for tool, op := range map[string]string{"secret_request": "request", "secret_list": "list", "secret_exec": "exec", "secret_manage": "manage",
+		"secret_exec_start": "exec_start", "secret_exec_status": "exec_status", "secret_exec_stop": "exec_stop"} {
 		props, _ := tools[tool]["properties"].(map[string]any)
 		for name, w := range wireRequestProperties(t, op) {
 			if name == "op" {
@@ -102,7 +103,7 @@ func TestToolSchemasCarryTheWireContractBounds(t *testing.T) {
 			}
 		}
 	}
-	if checked < 8 {
+	if checked < 20 {
 		t.Fatalf("only %d bounds compared; the wire schema layout changed", checked)
 	}
 }
