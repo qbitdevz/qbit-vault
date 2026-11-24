@@ -154,8 +154,14 @@ func psFormScript(d dialog) string {
 	fmt.Fprintf(&b, "$hides = @(%s)\n", strings.Join(hides, ", "))
 	b.WriteString(psBodyMarker + "\n")
 	b.WriteString(psFormTop)
-	b.WriteString(psFormInputs)
+	if allVisible(d.fields) {
+		// Nothing to reveal: the fields are added as they always were.
+		b.WriteString(strings.Replace(psFormInputs, "AddInput $tb 480 $hides[$i]", "$tb.Width = 480; $p.Controls.Add($tb)", 1))
+	} else {
+		b.WriteString(psEye + psFormInputs)
+	}
 	b.WriteString(psButtons)
+	b.WriteString("$first = $boxes[0]\n")
 	b.WriteString("$f.AcceptButton = $ok\n")
 	b.WriteString("$f.Add_Shown({ $this.Activate(); $boxes[0].Focus() | Out-Null })\n")
 	b.WriteString(psShow)
@@ -164,8 +170,18 @@ func psFormScript(d dialog) string {
 	return b.String()
 }
 
+// allVisible reports whether no field of a form is masked (no reveal toggle).
+func allVisible(fs []formField) bool {
+	for _, f := range fs {
+		if !f.visible {
+			return false
+		}
+	}
+	return true
+}
+
 const psFormInputs = `$boxes = @()
-for ($i = 0; $i -lt $labels.Count; $i++) { $fl = New-Object System.Windows.Forms.Label; $fl.UseMnemonic = $false; $fl.AutoSize = $true; $fl.MaximumSize = New-Object System.Drawing.Size(480, 0); $fl.Text = $labels[$i]; $p.Controls.Add($fl); $tb = New-Object System.Windows.Forms.TextBox; $tb.UseSystemPasswordChar = $hides[$i]; $tb.Width = 480; $tb.MaxLength = 70000; $p.Controls.Add($tb); $boxes += $tb }
+for ($i = 0; $i -lt $labels.Count; $i++) { $fl = New-Object System.Windows.Forms.Label; $fl.UseMnemonic = $false; $fl.AutoSize = $true; $fl.MaximumSize = New-Object System.Drawing.Size(480, 0); $fl.Text = $labels[$i]; $p.Controls.Add($fl); $tb = New-Object System.Windows.Forms.TextBox; $tb.UseSystemPasswordChar = $hides[$i]; $tb.MaxLength = 70000; AddInput $tb 480 $hides[$i]; $boxes += $tb }
 `
 
 // Each value leaves as one base64 line on the private stdout pipe, so no
